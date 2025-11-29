@@ -1,9 +1,13 @@
 package com.nfo.tracker
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
@@ -47,6 +52,23 @@ class MainActivity : ComponentActivity() {
 fun TrackingScreen() {
     val context = LocalContext.current
     var onShift by remember { mutableStateOf(false) }
+
+    // Launcher for requesting location permissions
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val fineGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+        if (fineGranted || coarseGranted) {
+            // Now we have location permission, start tracking
+            TrackingForegroundService.start(context)
+            HeartbeatWorker.schedule(context)
+        } else {
+            // Permission denied – reset state
+            onShift = false
+        }
+    }
 
     val statusText = if (onShift) {
         "On shift – tracking active"
@@ -74,13 +96,35 @@ fun TrackingScreen() {
 
         Button(
             onClick = {
-                onShift = !onShift
-                if (onShift) {
-                    // Start foreground tracking and schedule watchdog
-                    TrackingForegroundService.start(context)
-                    HeartbeatWorker.schedule(context)
+                if (!onShift) {
+                    // Going ON shift
+                    val fineGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val coarseGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (fineGranted || coarseGranted) {
+                        // Already have permission – start tracking directly
+                        onShift = true
+                        TrackingForegroundService.start(context)
+                        HeartbeatWorker.schedule(context)
+                    } else {
+                        // Ask for permission, onShift will be set in the callback if granted
+                        onShift = true
+                        permissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
                 } else {
-                    // Stop foreground tracking
+                    // Going OFF shift
+                    onShift = false
                     TrackingForegroundService.stop(context)
                 }
             }
