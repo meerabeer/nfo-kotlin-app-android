@@ -27,6 +27,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
@@ -64,6 +66,10 @@ fun TrackingScreen() {
             // Now we have location permission, start tracking
             TrackingForegroundService.start(context)
             HeartbeatWorker.schedule(context)
+
+            // Enqueue a one-time sync for immediate testing
+            val oneTimeRequest = OneTimeWorkRequestBuilder<HeartbeatWorker>().build()
+            WorkManager.getInstance(context).enqueue(oneTimeRequest)
         } else {
             // Permission denied – reset state
             onShift = false
@@ -112,6 +118,10 @@ fun TrackingScreen() {
                         onShift = true
                         TrackingForegroundService.start(context)
                         HeartbeatWorker.schedule(context)
+
+                        // Enqueue a one-time sync for immediate testing
+                        val oneTimeRequest = OneTimeWorkRequestBuilder<HeartbeatWorker>().build()
+                        WorkManager.getInstance(context).enqueue(oneTimeRequest)
                     } else {
                         // Ask for permission, onShift will be set in the callback if granted
                         onShift = true
