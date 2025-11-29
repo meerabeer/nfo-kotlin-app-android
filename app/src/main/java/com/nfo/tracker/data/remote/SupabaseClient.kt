@@ -20,7 +20,7 @@ object SupabaseClient {
 
     private const val BASE_URL = "https://rzivbeaqfhamlpsfaqov.supabase.co"
     private const val API_KEY = "sb_publishable_Kifo4X6qxs6nkv7yilHRkA_7RapeV4a"
-    private const val TABLE_ENDPOINT = "$BASE_URL/rest/v1/nfo_status"
+    private const val TABLE_ENDPOINT = "$BASE_URL/rest/v1/nfo_status?on_conflict=username"
 
     private val client = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
@@ -63,16 +63,21 @@ object SupabaseClient {
             .addHeader("apikey", API_KEY)
             .addHeader("Authorization", "Bearer $API_KEY")
             .addHeader("Content-Type", "application/json")
-            .addHeader("Prefer", "return=minimal")
+            .addHeader("Prefer", "return=minimal,resolution=merge-duplicates")
             .build()
 
         return withContext(Dispatchers.IO) {
             try {
                 client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
+                    val code = response.code
+                    if (code in 200..299) {
+                        true
+                    } else if (code == 409) {
+                        // Conflict on upsert – treat as success (row already exists)
+                        Log.w(TAG, "Upsert conflict (409), treating as success")
                         true
                     } else {
-                        Log.e(TAG, "Sync failed: ${response.code} - ${response.message}")
+                        Log.e(TAG, "Sync failed: $code - ${response.message}")
                         false
                     }
                 }
