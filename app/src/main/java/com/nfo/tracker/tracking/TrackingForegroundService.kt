@@ -1,5 +1,6 @@
 package com.nfo.tracker.tracking
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,13 +8,27 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.nfo.tracker.MainActivity
 import com.nfo.tracker.R
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
+import com.nfo.tracker.data.local.HeartbeatDatabase
+import com.nfo.tracker.data.local.HeartbeatEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class TrackingForegroundService : Service() {
 
@@ -45,6 +60,8 @@ class TrackingForegroundService : Service() {
     }
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var locationCallback: LocationCallback? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -55,10 +72,10 @@ class TrackingForegroundService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, createNotification())
-                // TODO: start requesting location updates and writing to Room
+                startLocationUpdates()
             }
             ACTION_STOP -> {
-                // TODO: stop location updates and clean up
+                stopLocationUpdates()
                 stopForeground(true)
                 stopSelf()
             }
@@ -68,6 +85,87 @@ class TrackingForegroundService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        stopLocationUpdates()
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun startLocationUpdates() {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) {
+            // No permission – nothing to do, let the activity handle asking the user
+            stopSelf()
+            return
+        }
+
+        if (locationCallback != null) {
+            // Already running
+            return
+        }
+
+        // Simple request for now: update every 30 seconds with balanced power accuracy
+        val request = LocationRequest.Builder(
+            30_000L
+        )
+            .setMinUpdateIntervalMillis(15_000L)
+            .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+            .build()
+
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val location = result.lastLocation ?: return
+
+                // Build a simple heartbeat row. Later we will plug real username/status/activity.
+                val heartbeat = HeartbeatEntity(
+                    username = "NFO_TEST", // TODO: replace with real logged-in username
+                    name = null,
+                    onShift = true,
+                    status = "on-shift",
+                    activity = "tracking",
+                    siteId = null,
+                    workOrderId = null,
+                    lat = location.latitude,
+                    lng = location.longitude,
+                    updatedAt = System.currentTimeMillis(),
+                    loggedIn = true,
+                    lastPing = System.currentTimeMillis(),
+                    lastActiveSource = "fgs-location",
+                    lastActiveAt = System.currentTimeMillis(),
+                    homeLocation = null,
+                    createdAtLocal = System.currentTimeMillis(),
+                    synced = false
+                )
+
+                serviceScope.launch {
+                    val db = HeartbeatDatabase.getInstance(applicationContext)
+                    db.heartbeatDao().insert(heartbeat)
+                }
+            }
+        }
+
+        fusedLocationClient.requestLocationUpdates(
+            request,
+            locationCallback!!,
+            Looper.getMainLooper()
+        )
+    }
+
+    private fun stopLocationUpdates() {
+        locationCallback?.let { callback ->
+            fusedLocationClient.removeLocationUpdates(callback)
+        }
+        locationCallback = null
+    }
 
     private fun createNotification(): Notification {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
