@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -146,9 +147,20 @@ class TrackingForegroundService : Service() {
                     synced = false
                 )
 
+                Log.d(
+                    "TrackingService",
+                    "Location heartbeat: lat=${location.latitude}, lng=${location.longitude}"
+                )
+
                 serviceScope.launch {
                     val db = HeartbeatDatabase.getInstance(applicationContext)
-                    db.heartbeatDao().insert(heartbeat)
+                    val dao = db.heartbeatDao()
+                    val id = dao.insert(heartbeat)
+                    val unsyncedCount = dao.getUnsynced(limit = 1000).size
+                    Log.d(
+                        "TrackingService",
+                        "Inserted heartbeat id=$id, unsyncedCount=$unsyncedCount"
+                    )
                 }
             }
         }
