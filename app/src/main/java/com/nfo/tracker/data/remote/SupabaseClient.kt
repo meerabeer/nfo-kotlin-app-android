@@ -77,7 +77,16 @@ object SupabaseClient {
                         Log.w(TAG, "Upsert conflict (409), treating as success")
                         true
                     } else {
-                        Log.e(TAG, "Sync failed: $code - ${response.message}")
+                        val errorBody = try {
+                            response.body?.string()
+                        } catch (e: Exception) {
+                            "error reading body: ${e.message}"
+                        }
+
+                        Log.e(
+                            TAG,
+                            "Sync failed: $code - $errorBody"
+                        )
                         false
                     }
                 }
