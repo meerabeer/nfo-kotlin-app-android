@@ -33,6 +33,11 @@ import androidx.work.WorkManager
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
+import com.nfo.tracker.work.HealthWatchdogScheduler
+
+/** SharedPreferences file for tracking state (shared with HealthWatchdogWorker). */
+private const val PREFS_NAME = "nfo_tracker_prefs"
+private const val KEY_ON_SHIFT = "on_shift"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,6 +61,17 @@ private fun enqueueImmediateHeartbeatSync(context: Context) {
     WorkManager.getInstance(context.applicationContext).enqueue(workRequest)
 }
 
+/**
+ * Persists the on-shift state to SharedPreferences.
+ * This is read by [HealthWatchdogWorker] to decide whether to check heartbeat freshness.
+ */
+private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(KEY_ON_SHIFT, isOnShift)
+        .apply()
+}
+
 @Composable
 fun TrackingScreen() {
     val context = LocalContext.current
@@ -70,11 +86,14 @@ fun TrackingScreen() {
 
         if (fineGranted || coarseGranted) {
             // Now we have location permission, start tracking
+            saveOnShiftState(context, true)
             TrackingForegroundService.start(context)
             HeartbeatWorker.schedule(context)
+            HealthWatchdogScheduler.schedule(context)
             enqueueImmediateHeartbeatSync(context)
         } else {
             // Permission denied – reset state
+            saveOnShiftState(context, false)
             onShift = false
         }
     }
@@ -119,8 +138,10 @@ fun TrackingScreen() {
                     if (fineGranted || coarseGranted) {
                         // Already have permission – start tracking directly
                         onShift = true
+                        saveOnShiftState(context, true)
                         TrackingForegroundService.start(context)
                         HeartbeatWorker.schedule(context)
+                        HealthWatchdogScheduler.schedule(context)
                         enqueueImmediateHeartbeatSync(context)
                     } else {
                         // Ask for permission, onShift will be set in the callback if granted
@@ -135,7 +156,9 @@ fun TrackingScreen() {
                 } else {
                     // Going OFF shift
                     onShift = false
+                    saveOnShiftState(context, false)
                     TrackingForegroundService.stop(context)
+                    HealthWatchdogScheduler.cancel(context)
                 }
             }
         ) {

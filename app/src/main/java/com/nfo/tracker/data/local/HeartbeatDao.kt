@@ -22,4 +22,11 @@ interface HeartbeatDao {
 
     @Query("DELETE FROM heartbeats WHERE synced = 1")
     suspend fun deleteSynced()
+
+    /**
+     * Returns the most recent heartbeat by created_at_local timestamp.
+     * Used by HealthWatchdogWorker to check if tracking is still alive.
+     */
+    @Query("SELECT * FROM heartbeats ORDER BY created_at_local DESC LIMIT 1")
+    suspend fun getLastHeartbeat(): HeartbeatEntity?
 }

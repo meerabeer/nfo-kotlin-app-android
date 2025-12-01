@@ -41,6 +41,7 @@ class TrackingForegroundService : Service() {
 
         const val ACTION_START = "com.nfo.tracker.action.START_TRACKING"
         const val ACTION_STOP = "com.nfo.tracker.action.STOP_TRACKING"
+        const val ACTION_START_FROM_WATCHDOG = "com.nfo.tracker.action.START_FROM_WATCHDOG"
 
         fun start(context: Context) {
             val intent = Intent(context, TrackingForegroundService::class.java).apply {
@@ -73,10 +74,17 @@ class TrackingForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                Log.d("TrackingService", "Starting tracking (user initiated)")
+                startForeground(NOTIFICATION_ID, createNotification())
+                startLocationUpdates()
+            }
+            ACTION_START_FROM_WATCHDOG -> {
+                Log.w("TrackingService", "Restarting tracking (watchdog initiated - service was stale)")
                 startForeground(NOTIFICATION_ID, createNotification())
                 startLocationUpdates()
             }
             ACTION_STOP -> {
+                Log.d("TrackingService", "Stopping tracking")
                 stopLocationUpdates()
                 stopForeground(true)
                 stopSelf()
