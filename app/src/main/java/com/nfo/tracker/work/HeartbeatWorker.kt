@@ -55,15 +55,27 @@ class HeartbeatWorker(
                 return@withContext Result.success()
             }
 
-            Log.d("HeartbeatWorker", "Syncing ${unsynced.size} heartbeats to Supabase")
+            // Deduplicate: keep only the latest heartbeat per username
+            // (Supabase upsert cannot handle multiple rows with the same username in one batch)
+            val dedupedHeartbeats = unsynced
+                .groupBy { it.username }
+                .mapValues { (_, heartbeats) -> heartbeats.maxByOrNull { it.createdAtLocal } }
+                .values
+                .filterNotNull()
 
-            val success = SupabaseClient.syncHeartbeats(unsynced)
+            Log.d(
+                "HeartbeatWorker",
+                "Syncing ${dedupedHeartbeats.size} heartbeats (deduped from ${unsynced.size} unsynced rows) to Supabase"
+            )
+
+            val success = SupabaseClient.syncHeartbeats(dedupedHeartbeats)
 
             if (success) {
+                // Mark ALL original unsynced heartbeats as synced (not just the deduped ones)
                 val ids = unsynced.map { it.localId }
                 dao.markAsSynced(ids)
                 dao.deleteSynced()
-                Log.d("HeartbeatWorker", "Successfully synced ${ids.size} heartbeats")
+                Log.d("HeartbeatWorker", "Successfully synced, marked ${ids.size} local rows as synced")
                 Result.success()
             } else {
                 Log.e("HeartbeatWorker", "Supabase sync failed, will retry later")
