@@ -13,6 +13,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 object SupabaseClient {
 
@@ -28,15 +30,20 @@ object SupabaseClient {
         })
         .build()
 
+    // Use Asia/Riyadh (UTC+3) so Supabase shows same clock time as mobile device
+    private val riyadhZone: ZoneId = ZoneId.of("Asia/Riyadh")
+
     /**
-     * Converts epoch millis (or seconds) to ISO-8601 UTC string.
+     * Converts epoch millis (or seconds) to ISO-8601 string in Asia/Riyadh timezone.
      * Handles both epoch seconds (10 digits) and millis (13 digits).
+     * Output example: 2025-12-01T21:10:30+03:00
      */
-    private fun Long?.toIsoUtc(): String? {
+    private fun Long?.toRiyadhTime(): String? {
         if (this == null) return null
         // If the value looks like epoch seconds (10 digits), convert to millis.
         val millis = if (this < 3_000_000_000L) this * 1000L else this
-        return Instant.ofEpochMilli(millis).toString() // e.g. 2025-12-01T13:45:30Z
+        val instant = Instant.ofEpochMilli(millis)
+        return OffsetDateTime.ofInstant(instant, riyadhZone).toString()
     }
 
     suspend fun syncHeartbeats(heartbeats: List<HeartbeatEntity>): Boolean {
@@ -56,15 +63,15 @@ object SupabaseClient {
                 put("lat", heartbeat.lat ?: JSONObject.NULL)
                 put("lng", heartbeat.lng ?: JSONObject.NULL)
 
-                // FIXED: convert epoch → ISO UTC
+                // Convert epoch → ISO with Asia/Riyadh (+03:00) so Supabase shows local KSA time
                 put(
                     "updated_at",
-                    heartbeat.updatedAt.toIsoUtc() ?: JSONObject.NULL
+                    heartbeat.updatedAt.toRiyadhTime() ?: JSONObject.NULL
                 )
                 put("logged_in", heartbeat.loggedIn ?: JSONObject.NULL)
                 put(
                     "last_ping",
-                    heartbeat.lastPing.toIsoUtc() ?: JSONObject.NULL
+                    heartbeat.lastPing.toRiyadhTime() ?: JSONObject.NULL
                 )
                 put(
                     "last_active_source",
@@ -72,7 +79,7 @@ object SupabaseClient {
                 )
                 put(
                     "last_active_at",
-                    heartbeat.lastActiveAt.toIsoUtc() ?: JSONObject.NULL
+                    heartbeat.lastActiveAt.toRiyadhTime() ?: JSONObject.NULL
                 )
                 put("home_location", heartbeat.homeLocation ?: JSONObject.NULL)
             }

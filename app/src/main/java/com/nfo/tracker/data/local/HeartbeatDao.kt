@@ -9,10 +9,10 @@ import androidx.room.Query
 interface HeartbeatDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(heartbeat: HeartbeatEntity): Long
+    suspend fun upsert(heartbeat: HeartbeatEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(heartbeats: List<HeartbeatEntity>): List<Long>
+    suspend fun upsertAll(heartbeats: List<HeartbeatEntity>): List<Long>
 
     @Query("SELECT * FROM heartbeats WHERE synced = 0 ORDER BY created_at_local ASC LIMIT :limit")
     suspend fun getUnsynced(limit: Int = 100): List<HeartbeatEntity>

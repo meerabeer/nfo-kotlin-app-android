@@ -2,6 +2,7 @@ package com.nfo.tracker.data.local
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -9,7 +10,10 @@ import androidx.room.PrimaryKey
  * Column names are aligned with the Supabase nfo_status table
  * so mapping to JSON/body is straightforward.
  */
-@Entity(tableName = "heartbeats")
+@Entity(
+    tableName = "heartbeats",
+    indices = [Index(value = ["username"], unique = true)]
+)
 data class HeartbeatEntity(
 
     // Local primary key (not sent to server)

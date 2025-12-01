@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [HeartbeatEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class HeartbeatDatabase : RoomDatabase() {

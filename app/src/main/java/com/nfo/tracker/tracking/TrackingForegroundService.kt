@@ -155,18 +155,18 @@ class TrackingForegroundService : Service() {
                     "Location heartbeat: lat=${location.latitude}, lng=${location.longitude}"
                 )
 
-                // Insert into DB and immediately sync to Supabase (Uber-style)
+                // Upsert into DB and immediately sync to Supabase (Uber-style)
                 serviceScope.launch {
                     val db = HeartbeatDatabase.getInstance(applicationContext)
                     val dao = db.heartbeatDao()
 
-                    // Insert and get the generated local_id
-                    val localId = dao.insert(heartbeat)
+                    // Upsert (replace if username exists) and get the generated local_id
+                    val localId = dao.upsert(heartbeat)
                     val entityWithId = heartbeat.copy(localId = localId)
 
                     Log.d(
                         "TrackingService",
-                        "Inserted heartbeat id=$localId, attempting immediate sync..."
+                        "Upserted heartbeat id=$localId, attempting immediate sync..."
                     )
 
                     // Immediately try to sync this single heartbeat to Supabase
