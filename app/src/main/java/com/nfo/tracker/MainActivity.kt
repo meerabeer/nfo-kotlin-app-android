@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.nfo.tracker.tracking.TrackingForegroundService
@@ -66,10 +67,9 @@ private fun enqueueImmediateHeartbeatSync(context: Context) {
  * This is read by [HealthWatchdogWorker] to decide whether to check heartbeat freshness.
  */
 private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
-    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .edit()
-        .putBoolean(KEY_ON_SHIFT, isOnShift)
-        .apply()
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+        putBoolean(KEY_ON_SHIFT, isOnShift)
+    }
 }
 
 @Composable
