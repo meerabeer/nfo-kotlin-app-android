@@ -64,7 +64,7 @@ private fun enqueueImmediateHeartbeatSync(context: Context) {
 
 /**
  * Persists the on-shift state to SharedPreferences.
- * This is read by [HealthWatchdogWorker] to decide whether to check heartbeat freshness.
+ * This is read by HealthWatchdogWorker to decide whether to check heartbeat freshness.
  */
 private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
