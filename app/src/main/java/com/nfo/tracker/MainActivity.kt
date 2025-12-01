@@ -3,6 +3,7 @@ package com.nfo.tracker
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -95,6 +96,31 @@ fun TrackingScreen() {
             // Permission denied – reset state
             saveOnShiftState(context, false)
             onShift = false
+        }
+    }
+
+    // Launcher for requesting notification permission (Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // Notification permission result - we proceed regardless since tracking still works
+        // The user just won't see watchdog alerts if denied
+        if (!granted) {
+            android.util.Log.w("MainActivity", "Notification permission denied - watchdog alerts will be silent")
+        }
+    }
+
+    // Request notification permission on first composition (Android 13+)
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotificationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasNotificationPermission) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
