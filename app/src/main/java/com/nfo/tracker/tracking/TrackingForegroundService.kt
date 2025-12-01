@@ -25,6 +25,7 @@ import com.nfo.tracker.MainActivity
 import com.nfo.tracker.R
 import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.data.local.HeartbeatEntity
+import com.nfo.tracker.data.remote.SupabaseClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -126,7 +127,9 @@ class TrackingForegroundService : Service() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
 
-                // Build a simple heartbeat row. Later we will plug real username/status/activity.
+                val now = System.currentTimeMillis()
+
+                // Build a heartbeat row with all timestamp fields set
                 val heartbeat = HeartbeatEntity(
                     username = "NFO_TEST", // TODO: replace with real logged-in username
                     name = null,
@@ -137,13 +140,13 @@ class TrackingForegroundService : Service() {
                     workOrderId = null,
                     lat = location.latitude,
                     lng = location.longitude,
-                    updatedAt = System.currentTimeMillis(),
+                    updatedAt = now,
                     loggedIn = true,
-                    lastPing = System.currentTimeMillis(),
-                    lastActiveSource = "fgs-location",
-                    lastActiveAt = System.currentTimeMillis(),
+                    lastPing = now,
+                    lastActiveSource = "mobile-app-gps",
+                    lastActiveAt = now,
                     homeLocation = null,
-                    createdAtLocal = System.currentTimeMillis(),
+                    createdAtLocal = now,
                     synced = false
                 )
 
@@ -152,15 +155,30 @@ class TrackingForegroundService : Service() {
                     "Location heartbeat: lat=${location.latitude}, lng=${location.longitude}"
                 )
 
+                // Insert into DB and immediately sync to Supabase (Uber-style)
                 serviceScope.launch {
                     val db = HeartbeatDatabase.getInstance(applicationContext)
                     val dao = db.heartbeatDao()
-                    val id = dao.insert(heartbeat)
-                    val unsyncedCount = dao.getUnsynced(limit = 1000).size
+
+                    // Insert and get the generated local_id
+                    val localId = dao.insert(heartbeat)
+                    val entityWithId = heartbeat.copy(localId = localId)
+
                     Log.d(
                         "TrackingService",
-                        "Inserted heartbeat id=$id, unsyncedCount=$unsyncedCount"
+                        "Inserted heartbeat id=$localId, attempting immediate sync..."
                     )
+
+                    // Immediately try to sync this single heartbeat to Supabase
+                    val success = SupabaseClient.syncHeartbeats(listOf(entityWithId))
+
+                    if (success) {
+                        dao.markAsSynced(listOf(localId))
+                        dao.deleteSynced()
+                        Log.d("TrackingService", "Immediate sync success for id=$localId")
+                    } else {
+                        Log.w("TrackingService", "Immediate sync failed for id=$localId, worker will retry later")
+                    }
                 }
             }
         }

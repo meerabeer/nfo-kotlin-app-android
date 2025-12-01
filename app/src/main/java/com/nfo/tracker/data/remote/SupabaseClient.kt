@@ -28,6 +28,17 @@ object SupabaseClient {
         })
         .build()
 
+    /**
+     * Converts epoch millis (or seconds) to ISO-8601 UTC string.
+     * Handles both epoch seconds (10 digits) and millis (13 digits).
+     */
+    private fun Long?.toIsoUtc(): String? {
+        if (this == null) return null
+        // If the value looks like epoch seconds (10 digits), convert to millis.
+        val millis = if (this < 3_000_000_000L) this * 1000L else this
+        return Instant.ofEpochMilli(millis).toString() // e.g. 2025-12-01T13:45:30Z
+    }
+
     suspend fun syncHeartbeats(heartbeats: List<HeartbeatEntity>): Boolean {
         if (heartbeats.isEmpty()) return true
 
@@ -44,11 +55,25 @@ object SupabaseClient {
                 put("work_order_id", heartbeat.workOrderId ?: JSONObject.NULL)
                 put("lat", heartbeat.lat ?: JSONObject.NULL)
                 put("lng", heartbeat.lng ?: JSONObject.NULL)
-                put("updated_at", Instant.ofEpochMilli(heartbeat.updatedAt).toString())
+
+                // FIXED: convert epoch → ISO UTC
+                put(
+                    "updated_at",
+                    heartbeat.updatedAt.toIsoUtc() ?: JSONObject.NULL
+                )
                 put("logged_in", heartbeat.loggedIn ?: JSONObject.NULL)
-                put("last_ping", heartbeat.lastPing?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
-                put("last_active_source", heartbeat.lastActiveSource ?: JSONObject.NULL)
-                put("last_active_at", heartbeat.lastActiveAt?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
+                put(
+                    "last_ping",
+                    heartbeat.lastPing.toIsoUtc() ?: JSONObject.NULL
+                )
+                put(
+                    "last_active_source",
+                    heartbeat.lastActiveSource ?: JSONObject.NULL
+                )
+                put(
+                    "last_active_at",
+                    heartbeat.lastActiveAt.toIsoUtc() ?: JSONObject.NULL
+                )
                 put("home_location", heartbeat.homeLocation ?: JSONObject.NULL)
             }
             jsonArray.put(obj)
@@ -70,24 +95,24 @@ object SupabaseClient {
             try {
                 client.newCall(request).execute().use { response ->
                     val code = response.code
-                    if (code in 200..299) {
-                        true
-                    } else if (code == 409) {
-                        // Conflict on upsert – treat as success (row already exists)
-                        Log.w(TAG, "Upsert conflict (409), treating as success")
-                        true
-                    } else {
-                        val errorBody = try {
-                            response.body?.string()
-                        } catch (e: Exception) {
-                            "error reading body: ${e.message}"
-                        }
+                    val responseBody = try {
+                        response.body?.string()
+                    } catch (e: Exception) {
+                        "error reading body: ${e.message}"
+                    }
 
+                    if (code in 200..299) {
+                        Log.d(TAG, "Sync success: code=$code, rows=${heartbeats.size}")
+                        return@withContext true
+                    } else if (code == 409) {
+                        Log.w(TAG, "Upsert conflict (409), treating as success; rows=${heartbeats.size}")
+                        return@withContext true
+                    } else {
                         Log.e(
                             TAG,
-                            "Sync failed: $code - $errorBody"
+                            "Sync failed: code=$code, body=$responseBody, rows=${heartbeats.size}"
                         )
-                        false
+                        return@withContext false
                     }
                 }
             } catch (e: IOException) {
