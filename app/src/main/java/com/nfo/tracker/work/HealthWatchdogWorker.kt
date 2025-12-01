@@ -83,10 +83,13 @@ class HealthWatchdogWorker(
             val lastHeartbeatTime = lastHeartbeat.createdAtLocal
             val diffMillis = now - lastHeartbeatTime
             val diffMinutes = TimeUnit.MILLISECONDS.toMinutes(diffMillis)
+            val diffSeconds = TimeUnit.MILLISECONDS.toSeconds(diffMillis)
 
             Log.d(
                 TAG,
-                "Last heartbeat: ${diffMinutes}m ago (threshold: ${WATCHDOG_STALE_MINUTES}m)"
+                "Last heartbeat: id=${lastHeartbeat.localId}, username=${lastHeartbeat.username}, " +
+                    "age=${diffMinutes}m ${diffSeconds % 60}s, synced=${lastHeartbeat.synced}, " +
+                    "threshold=${WATCHDOG_STALE_MINUTES}m"
             )
 
             // 4. Check if stale

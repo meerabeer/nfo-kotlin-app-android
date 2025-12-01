@@ -182,7 +182,9 @@ class TrackingForegroundService : Service() {
 
                     if (success) {
                         dao.markAsSynced(listOf(localId))
-                        dao.deleteSynced()
+                        // NOTE: Do NOT call deleteSynced() here!
+                        // We keep the row so HealthWatchdogWorker can read it via getLastHeartbeat().
+                        // The row will be replaced on the next upsert anyway (unique index on username).
                         Log.d("TrackingService", "Immediate sync success for id=$localId")
                     } else {
                         Log.w("TrackingService", "Immediate sync failed for id=$localId, worker will retry later")
