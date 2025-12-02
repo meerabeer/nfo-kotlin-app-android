@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,8 +44,43 @@ private const val PREFS_NAME = "nfo_tracker_prefs"
 private const val KEY_ON_SHIFT = "on_shift"
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
+    // Launcher for POST_NOTIFICATIONS permission (Android 13+)
+    private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Register notification permission launcher BEFORE setContent
+        notificationPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                Log.d(TAG, "POST_NOTIFICATIONS permission GRANTED")
+            } else {
+                Log.w(TAG, "POST_NOTIFICATIONS permission DENIED - notifications will be silent")
+            }
+        }
+
+        // Request notification permission on Android 13+ (API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasPermission) {
+                Log.d(TAG, "Requesting POST_NOTIFICATIONS permission...")
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                Log.d(TAG, "POST_NOTIFICATIONS permission already granted")
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             NfoKotlinAppTheme {
@@ -96,31 +133,6 @@ fun TrackingScreen() {
             // Permission denied – reset state
             saveOnShiftState(context, false)
             onShift = false
-        }
-    }
-
-    // Launcher for requesting notification permission (Android 13+)
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        // Notification permission result - we proceed regardless since tracking still works
-        // The user just won't see watchdog alerts if denied
-        if (!granted) {
-            android.util.Log.w("MainActivity", "Notification permission denied - watchdog alerts will be silent")
-        }
-    }
-
-    // Request notification permission on first composition (Android 13+)
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val hasNotificationPermission = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!hasNotificationPermission) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
         }
     }
 

@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -35,6 +36,7 @@ import kotlinx.coroutines.launch
 class TrackingForegroundService : Service() {
 
     companion object {
+        private const val TAG = "TrackingService"
         const val CHANNEL_ID = "nfo_tracking_channel"
         const val CHANNEL_NAME = "NFO Tracking"
         const val NOTIFICATION_ID = 1001
@@ -68,30 +70,81 @@ class TrackingForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "Service onCreate")
+        createNotificationChannel()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
+    /**
+     * Creates the notification channel for foreground service.
+     * Must be called before startForeground() on Android O+.
+     */
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows when NFO location tracking is active"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+            Log.d(TAG, "Notification channel created: $CHANNEL_ID")
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand: action=${intent?.action}")
+
         when (intent?.action) {
             ACTION_START -> {
-                Log.d("TrackingService", "Starting tracking (user initiated)")
-                startForeground(NOTIFICATION_ID, createNotification())
+                Log.d(TAG, "Starting tracking (user initiated)")
+                startForegroundWithType()
                 startLocationUpdates()
             }
             ACTION_START_FROM_WATCHDOG -> {
-                Log.w("TrackingService", "Restarting tracking (watchdog initiated - service was stale)")
-                startForeground(NOTIFICATION_ID, createNotification())
+                Log.w(TAG, "Restarting tracking (watchdog initiated - service was stale)")
+                startForegroundWithType()
                 startLocationUpdates()
             }
             ACTION_STOP -> {
-                Log.d("TrackingService", "Stopping tracking")
+                Log.d(TAG, "Stopping tracking")
                 stopLocationUpdates()
-                stopForeground(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
+            }
+            else -> {
+                Log.w(TAG, "Unknown action: ${intent?.action}, starting foreground anyway")
+                startForegroundWithType()
             }
         }
         // If the system kills the service, try to recreate it later with a null intent
         return START_STICKY
+    }
+
+    /**
+     * Starts foreground with the correct service type for Android Q+ (API 29+).
+     * Must be called within a few seconds of service start.
+     */
+    private fun startForegroundWithType() {
+        val notification = createNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+            Log.d(TAG, "startForeground called with FOREGROUND_SERVICE_TYPE_LOCATION")
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+            Log.d(TAG, "startForeground called (pre-Q)")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -159,7 +212,7 @@ class TrackingForegroundService : Service() {
                 )
 
                 Log.d(
-                    "TrackingService",
+                    TAG,
                     "Location heartbeat: lat=${location.latitude}, lng=${location.longitude}"
                 )
 
@@ -173,7 +226,7 @@ class TrackingForegroundService : Service() {
                     val entityWithId = heartbeat.copy(localId = localId)
 
                     Log.d(
-                        "TrackingService",
+                        TAG,
                         "Upserted heartbeat id=$localId, attempting immediate sync..."
                     )
 
@@ -185,9 +238,9 @@ class TrackingForegroundService : Service() {
                         // NOTE: Do NOT call deleteSynced() here!
                         // We keep the row so HealthWatchdogWorker can read it via getLastHeartbeat().
                         // The row will be replaced on the next upsert anyway (unique index on username).
-                        Log.d("TrackingService", "Immediate sync success for id=$localId")
+                        Log.d(TAG, "Immediate sync success for id=$localId")
                     } else {
-                        Log.w("TrackingService", "Immediate sync failed for id=$localId, worker will retry later")
+                        Log.w(TAG, "Immediate sync failed for id=$localId, worker will retry later")
                     }
                 }
             }
@@ -208,24 +261,14 @@ class TrackingForegroundService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW
-            )
-            notificationManager.createNotificationChannel(channel)
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-
-        val tapIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
             tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -234,6 +277,8 @@ class TrackingForegroundService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 }
