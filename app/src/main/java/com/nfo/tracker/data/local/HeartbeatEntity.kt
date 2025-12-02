@@ -42,6 +42,12 @@ data class HeartbeatEntity(
     @ColumnInfo(name = "work_order_id")
     val workOrderId: String? = null,
 
+    @ColumnInfo(name = "via_warehouse")
+    val viaWarehouse: Boolean? = null,
+
+    @ColumnInfo(name = "warehouse_name")
+    val warehouseName: String? = null,
+
     @ColumnInfo(name = "lat")
     val lat: Double? = null,
 

@@ -136,6 +136,14 @@ object SupabaseClient {
         val jsonArray = JSONArray()
 
         for (heartbeat in heartbeats) {
+            // Debug log for heartbeat payload
+            Log.d(
+                TAG,
+                "Sending heartbeat: username=${heartbeat.username}, activity=${heartbeat.activity}, " +
+                    "site_id=${heartbeat.siteId}, via_warehouse=${heartbeat.viaWarehouse}, " +
+                    "warehouse_name=${heartbeat.warehouseName}"
+            )
+
             val obj = JSONObject().apply {
                 put("username", heartbeat.username)
                 put("name", heartbeat.name ?: JSONObject.NULL)
@@ -143,6 +151,8 @@ object SupabaseClient {
                 put("status", heartbeat.status ?: JSONObject.NULL)
                 put("activity", heartbeat.activity ?: JSONObject.NULL)
                 put("site_id", heartbeat.siteId ?: JSONObject.NULL)
+                put("via_warehouse", heartbeat.viaWarehouse ?: JSONObject.NULL)
+                put("warehouse_name", heartbeat.warehouseName ?: JSONObject.NULL)
                 put("lat", heartbeat.lat ?: JSONObject.NULL)
                 put("lng", heartbeat.lng ?: JSONObject.NULL)
 

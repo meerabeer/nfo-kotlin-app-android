@@ -259,6 +259,12 @@ class TrackingForegroundService : Service() {
                 val displayName = ShiftStateHelper.getDisplayName(applicationContext)
                 val homeLocation = ShiftStateHelper.getHomeLocation(applicationContext)
 
+                // Get current activity context from ShiftStateHelper
+                val currentActivity = ShiftStateHelper.getCurrentActivity(applicationContext)
+                val currentSiteId = ShiftStateHelper.getCurrentSiteId(applicationContext)
+                val currentViaWarehouse = ShiftStateHelper.isViaWarehouse(applicationContext)
+                val currentWarehouseName = ShiftStateHelper.getWarehouseName(applicationContext)
+
                 if (username.isNullOrBlank()) {
                     Log.w(TAG, "No logged-in user found! Username is null/blank. Heartbeat will use 'UNKNOWN'.")
                 }
@@ -271,9 +277,11 @@ class TrackingForegroundService : Service() {
                     name = displayName,
                     onShift = true,
                     status = "on-shift",
-                    activity = "tracking",
-                    siteId = null,
+                    activity = currentActivity ?: "tracking",
+                    siteId = currentSiteId,
                     workOrderId = null,
+                    viaWarehouse = if (currentViaWarehouse) true else null,
+                    warehouseName = currentWarehouseName,
                     lat = location.latitude,
                     lng = location.longitude,
                     updatedAt = now,
