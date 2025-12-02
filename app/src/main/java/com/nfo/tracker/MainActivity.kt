@@ -382,13 +382,17 @@ fun TrackingScreen(
                                 val username = ShiftStateHelper.getUsername(context)
                                 val displayName = ShiftStateHelper.getDisplayName(context)
 
-                                Log.d("MainActivity", "Going off shift, sending final heartbeat for $username")
+                                // Create safe non-null values for the heartbeat call
+                                val safeUsername = username ?: "UNKNOWN"
+                                val safeDisplayName = displayName ?: safeUsername
+
+                                Log.d("MainActivity", "Going off shift, sending final heartbeat for $safeUsername")
 
                                 // Send the off-shift heartbeat (waits for sync attempt)
                                 val syncSuccess = ShiftStateHelper.sendOffShiftHeartbeat(
                                     context = context,
-                                    username = username,
-                                    name = displayName
+                                    username = safeUsername,
+                                    name = safeDisplayName
                                 )
 
                                 Log.d(
