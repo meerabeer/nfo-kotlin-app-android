@@ -92,21 +92,21 @@ fun DeviceHealthScreen(
             // Health check items - CRITICAL (required)
             HealthCheckItem(
                 label = "Location Permission",
-                isOk = status.hasLocationPermission,
+                isOk = status.locationPermissionOk,
                 isCritical = true,
                 onFix = onOpenAppSettings
             )
 
             HealthCheckItem(
                 label = "Location Enabled",
-                isOk = status.isLocationEnabled,
+                isOk = status.locationEnabled,
                 isCritical = true,
                 onFix = onOpenLocationSettings
             )
 
             HealthCheckItem(
                 label = "Network Connection",
-                isOk = status.isNetworkOk,
+                isOk = status.networkOk,
                 isCritical = true,
                 onFix = onRefresh,
                 fixButtonText = "Retry"
@@ -115,16 +115,16 @@ fun DeviceHealthScreen(
             // RECOMMENDED (not required)
             HealthCheckItem(
                 label = "Background Location",
-                description = if (status.hasBackgroundLocationPermission) "OK" else "Fix recommended",
-                isOk = status.hasBackgroundLocationPermission,
+                description = if (status.backgroundLocationOk) "OK" else "Fix recommended",
+                isOk = status.backgroundLocationOk,
                 isCritical = false,  // Recommended, not required
                 onFix = onOpenAppSettings
             )
 
             HealthCheckItem(
                 label = "Battery Optimization",
-                description = if (status.isBatteryOptimizationOk) "Unrestricted" else "Fix recommended",
-                isOk = status.isBatteryOptimizationOk,
+                description = if (status.batteryOptimizationOk) "Unrestricted" else "Fix recommended",
+                isOk = status.batteryOptimizationOk,
                 isCritical = false,  // Recommended, not required
                 onFix = onOpenBatterySettings
             )
@@ -159,7 +159,7 @@ fun DeviceHealthScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
-            } else if (!status.isBatteryOptimizationOk || !status.hasBackgroundLocationPermission) {
+            } else if (!status.batteryOptimizationOk || !status.backgroundLocationOk) {
                 // All critical OK but some recommended items not fixed
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
@@ -261,11 +261,11 @@ fun DeviceHealthScreenPreview_AllOk() {
     NfoKotlinAppTheme {
         DeviceHealthScreen(
             status = DeviceHealthStatus(
-                hasLocationPermission = true,
-                hasBackgroundLocationPermission = true,
-                isLocationEnabled = true,
-                isBatteryOptimizationOk = true,
-                isNetworkOk = true
+                locationPermissionOk = true,
+                backgroundLocationOk = true,
+                locationEnabled = true,
+                batteryOptimizationOk = true,
+                networkOk = true
             ),
             onRefresh = {},
             onOpenLocationSettings = {},
@@ -283,11 +283,11 @@ fun DeviceHealthScreenPreview_SomeIssues() {
     NfoKotlinAppTheme {
         DeviceHealthScreen(
             status = DeviceHealthStatus(
-                hasLocationPermission = true,
-                hasBackgroundLocationPermission = false,
-                isLocationEnabled = true,
-                isBatteryOptimizationOk = false,
-                isNetworkOk = true
+                locationPermissionOk = true,
+                backgroundLocationOk = false,
+                locationEnabled = true,
+                batteryOptimizationOk = false,
+                networkOk = true
             ),
             onRefresh = {},
             onOpenLocationSettings = {},

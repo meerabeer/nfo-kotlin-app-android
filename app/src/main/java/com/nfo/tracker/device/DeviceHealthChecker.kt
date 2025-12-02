@@ -14,83 +14,49 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 
-/**
- * Represents the current health status of the device for NFO tracking.
- */
-data class DeviceHealthStatus(
-    val hasLocationPermission: Boolean,
-    val hasBackgroundLocationPermission: Boolean,
-    val isLocationEnabled: Boolean,
-    val isBatteryOptimizationOk: Boolean,
-    val isNetworkOk: Boolean
-) {
-    /**
-     * Critical checks that MUST pass to start tracking:
-     * - Location permission (fine or coarse)
-     * - GPS/Location enabled
-     * - Network connection
-     *
-     * Background location and battery are RECOMMENDED but NOT required.
-     */
-    val allCriticalOk: Boolean
-        get() = hasLocationPermission && isLocationEnabled && isNetworkOk
+private const val TAG = "DeviceHealthChecker"
 
-    /**
-     * Ideal state: all critical + recommended checks pass.
-     */
+data class DeviceHealthStatus(
+    val locationPermissionOk: Boolean,
+    val backgroundLocationOk: Boolean,
+    val locationEnabled: Boolean,
+    val batteryOptimizationOk: Boolean,
+    val networkOk: Boolean
+) {
+    // CRITICAL: must be true to allow "Continue"
+    val allCriticalOk: Boolean
+        get() = locationPermissionOk && locationEnabled && networkOk
+
+    // Nice-to-have: perfect configuration
     val isHealthy: Boolean
-        get() = allCriticalOk && isBatteryOptimizationOk && hasBackgroundLocationPermission
+        get() = allCriticalOk && backgroundLocationOk && batteryOptimizationOk
 }
 
-/**
- * Utility object for checking device health and opening system settings.
- *
- * Used to gate the "Go On Shift" action - NFO cannot start tracking
- * unless critical device health checks pass.
- */
 object DeviceHealthChecker {
 
-    private const val TAG = "DeviceHealthChecker"
-
-    /**
-     * Performs all device health checks and returns the current status.
-     *
-     * @param context Application or Activity context.
-     * @return [DeviceHealthStatus] with the result of each check.
-     */
     fun getHealthStatus(context: Context): DeviceHealthStatus {
-        val hasLocationPermission = hasLocationPermission(context)
-        val hasBackgroundLocationPermission = hasBackgroundLocationPermission(context)
-        val isLocationEnabled = isLocationEnabled(context)
-        val isBatteryOptimizationOk = isBatteryOptimizationOk(context)
-        val isNetworkOk = isNetworkAvailable(context)
-
-        val status = DeviceHealthStatus(
-            hasLocationPermission = hasLocationPermission,
-            hasBackgroundLocationPermission = hasBackgroundLocationPermission,
-            isLocationEnabled = isLocationEnabled,
-            isBatteryOptimizationOk = isBatteryOptimizationOk,
-            isNetworkOk = isNetworkOk
-        )
+        val locationPermissionOk = hasLocationPermission(context)
+        val backgroundLocationOk = hasBackgroundLocationPermission(context)
+        val locationEnabled = isLocationEnabled(context)
+        val batteryOk = isBatteryOptimizationOk(context)
+        val networkOk = isNetworkAvailable(context)
 
         Log.d(
             TAG,
-            "Health check: " +
-                "locationPerm=$hasLocationPermission, " +
-                "bgLocationPerm=$hasBackgroundLocationPermission, " +
-                "locationEnabled=$isLocationEnabled, " +
-                "batteryOk=$isBatteryOptimizationOk, " +
-                "networkOk=$isNetworkOk, " +
-                "allCriticalOk=${status.allCriticalOk}, " +
-                "isHealthy=${status.isHealthy}"
+            "health: locPerm=$locationPermissionOk, bgLoc=$backgroundLocationOk, " +
+                    "gps=$locationEnabled, batteryOk=$batteryOk, netOk=$networkOk"
         )
 
-        return status
+        return DeviceHealthStatus(
+            locationPermissionOk = locationPermissionOk,
+            backgroundLocationOk = backgroundLocationOk,
+            locationEnabled = locationEnabled,
+            batteryOptimizationOk = batteryOk,
+            networkOk = networkOk
+        )
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Permission check methods
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ----------- CHECKS -----------
 
     private fun hasLocationPermission(context: Context): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
@@ -104,34 +70,33 @@ object DeviceHealthChecker {
         ) == PackageManager.PERMISSION_GRANTED
 
         Log.d(TAG, "Location permission: fine=$fineGranted, coarse=$coarseGranted")
+
+        // Treat either FINE or COARSE as OK
         return fineGranted || coarseGranted
     }
 
     private fun hasBackgroundLocationPermission(context: Context): Boolean {
-        // For Android 9 and below there is no separate background permission.
+        // Background location is "recommended", not required
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Log.d(TAG, "Background location: SDK < Q, auto-granted")
+            Log.d(TAG, "Background location: SDK<29 → treated as OK")
             return true
         }
 
-        // Check if the app even requested ACCESS_BACKGROUND_LOCATION in the manifest.
+        // If the app does not even request ACCESS_BACKGROUND_LOCATION, treat as OK
         val hasBgInManifest = try {
             val pm = context.packageManager
-            val info = pm.getPackageInfo(
+            val pkgInfo = pm.getPackageInfo(
                 context.packageName,
                 PackageManager.GET_PERMISSIONS
             )
-            info.requestedPermissions?.contains(
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == true
+            pkgInfo.requestedPermissions?.contains(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == true
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking manifest for background location: ${e.message}")
+            Log.w(TAG, "Failed to inspect manifest for background location", e)
             false
         }
 
-        // If not requested in manifest, treat as OK (recommended only).
         if (!hasBgInManifest) {
-            Log.d(TAG, "Background location: not in manifest, treating as OK")
+            Log.d(TAG, "Background location: not requested in manifest → treated as OK")
             return true
         }
 
@@ -145,94 +110,49 @@ object DeviceHealthChecker {
     }
 
     private fun isLocationEnabled(context: Context): Boolean {
-        return try {
-            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            val networkEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-            Log.d(TAG, "Location enabled: GPS=$gpsEnabled, Network=$networkEnabled")
-            gpsEnabled || networkEnabled
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking location enabled: ${e.message}")
-            false
-        }
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val enabled = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
+                lm?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+        Log.d(TAG, "Location enabled: $enabled")
+        return enabled
     }
 
     private fun isBatteryOptimizationOk(context: Context): Boolean {
-        return try {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            val ignoring = pm.isIgnoringBatteryOptimizations(context.packageName)
-            Log.d(TAG, "Battery optimization ignored: $ignoring")
-            ignoring
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking battery optimization: ${e.message}")
-            false
-        }
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val ignoring = pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+        Log.d(TAG, "Battery optimization: ignoring=$ignoring")
+        return ignoring
     }
 
     private fun isNetworkAvailable(context: Context): Boolean {
-        return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(network) ?: return false
-            val hasCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-            val hasWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-            Log.d(TAG, "Network available: cellular=$hasCellular, wifi=$hasWifi")
-            hasCellular || hasWifi
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking network: ${e.message}")
-            false
-        }
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = cm?.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        val ok = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        Log.d(TAG, "Network available: $ok")
+        return ok
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Settings openers
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ----------- INTENTS TO OPEN SETTINGS -----------
 
-    /**
-     * Opens the app details settings page where user can grant permissions.
-     */
     fun openAppSettings(context: Context) {
-        try {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", context.packageName, null)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            Log.d(TAG, "Opened app settings")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open app settings: ${e.message}", e)
-        }
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null)
+        )
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
     }
 
-    /**
-     * Opens the system location settings page.
-     */
-    fun openLocationSettings(context: Context) {
-        try {
-            val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            Log.d(TAG, "Opened location settings")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open location settings: ${e.message}", e)
-        }
-    }
-
-    /**
-     * Opens the battery optimization settings page.
-     * Falls back to app settings if the specific intent is not available.
-     */
     fun openBatteryOptimizationSettings(context: Context) {
-        try {
-            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            Log.d(TAG, "Opened battery optimization settings")
-        } catch (e: Exception) {
-            Log.w(TAG, "ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS not available: ${e.message}")
-            openAppSettings(context)
-        }
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+
+    fun openLocationSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
     }
 }
