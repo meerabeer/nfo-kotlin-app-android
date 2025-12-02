@@ -123,7 +123,7 @@ fun DiagnosticsScreen(
                 diagnosticsData?.let { data ->
                     // Section 1: Shift State
                     DiagnosticsSection(title = "Shift State") {
-                        DiagnosticsRow(label = "Username", value = data.username)
+                        DiagnosticsRow(label = "Username", value = data.username ?: "(not set)")
                         DiagnosticsRow(
                             label = "Display Name",
                             value = data.displayName ?: "(not set)"
@@ -246,7 +246,7 @@ fun DiagnosticsScreen(
  * Data class holding all diagnostic information.
  */
 private data class DiagnosticsData(
-    val username: String,
+    val username: String?,
     val displayName: String?,
     val isOnShift: Boolean,
     val lastHeartbeat: HeartbeatEntity?,
