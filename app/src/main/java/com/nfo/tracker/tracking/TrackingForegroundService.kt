@@ -44,6 +44,7 @@ class TrackingForegroundService : Service() {
         const val ACTION_START = "com.nfo.tracker.action.START_TRACKING"
         const val ACTION_STOP = "com.nfo.tracker.action.STOP_TRACKING"
         const val ACTION_START_FROM_WATCHDOG = "com.nfo.tracker.action.START_FROM_WATCHDOG"
+        const val ACTION_START_FROM_BOOT = "com.nfo.tracker.action.START_FROM_BOOT"
 
         fun start(context: Context) {
             val intent = Intent(context, TrackingForegroundService::class.java).apply {
@@ -105,6 +106,11 @@ class TrackingForegroundService : Service() {
             }
             ACTION_START_FROM_WATCHDOG -> {
                 Log.w(TAG, "Restarting tracking (watchdog initiated - service was stale)")
+                startForegroundWithType()
+                startLocationUpdates()
+            }
+            ACTION_START_FROM_BOOT -> {
+                Log.w(TAG, "Service: Started by BootReceiver (ACTION_START_FROM_BOOT)")
                 startForegroundWithType()
                 startLocationUpdates()
             }
