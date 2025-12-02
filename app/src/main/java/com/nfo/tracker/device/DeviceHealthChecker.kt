@@ -26,14 +26,21 @@ data class DeviceHealthStatus(
     val hasNetworkConnection: Boolean
 ) {
     /**
-     * Returns true if the device is fully configured for reliable tracking.
+     * Returns true if all CRITICAL checks pass (excluding battery optimization).
+     * Battery optimization is recommended but not required to start tracking.
      */
-    val isHealthy: Boolean
+    val allCriticalOk: Boolean
         get() = hasFineLocationPermission &&
                 hasBackgroundLocationPermission &&
                 isLocationEnabled &&
-                isIgnoringBatteryOptimizations &&
                 hasNetworkConnection
+
+    /**
+     * Returns true if the device is fully configured for reliable tracking.
+     * Includes battery optimization (ideal state).
+     */
+    val isHealthy: Boolean
+        get() = allCriticalOk && isIgnoringBatteryOptimizations
 }
 
 /**
@@ -130,12 +137,20 @@ object DeviceHealthChecker {
 
     private fun checkFineLocationPermission(context: Context): Boolean {
         return try {
-            ContextCompat.checkSelfPermission(
+            // Accept either fine OR coarse location permission
+            val fineGranted = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
+
+            val coarseGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            fineGranted || coarseGranted
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking fine location permission: ${e.message}", e)
+            Log.e(TAG, "Error checking location permission: ${e.message}", e)
             false
         }
     }
@@ -145,13 +160,26 @@ object DeviceHealthChecker {
             // Background location permission only exists on Android 10+ (API 29+)
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 // On older Android, background location is granted with foreground location
-                true
-            } else {
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
+                return true
             }
+
+            // Check if ACCESS_BACKGROUND_LOCATION is even requested in the manifest
+            // If not requested, don't fail on it
+            val pm = context.packageManager
+            val info = pm.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            val requestedPermissions = info.requestedPermissions?.toList().orEmpty()
+            val requestsBackgroundLocation = Manifest.permission.ACCESS_BACKGROUND_LOCATION in requestedPermissions
+
+            if (!requestsBackgroundLocation) {
+                Log.d(TAG, "ACCESS_BACKGROUND_LOCATION not in manifest, skipping check")
+                return true
+            }
+
+            // Check if the permission is granted
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
         } catch (e: Exception) {
             Log.e(TAG, "Error checking background location permission: ${e.message}", e)
             false

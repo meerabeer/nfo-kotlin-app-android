@@ -110,8 +110,9 @@ fun DeviceHealthScreen(
 
             HealthCheckItem(
                 label = "Battery Optimization",
-                description = if (status.isIgnoringBatteryOptimizations) "Unrestricted" else "Restricted",
+                description = if (status.isIgnoringBatteryOptimizations) "Unrestricted" else "Fix recommended",
                 isOk = status.isIgnoringBatteryOptimizations,
+                isCritical = false,  // Battery is recommended, not required
                 onFix = onOpenBatterySettings
             )
 
@@ -138,19 +139,27 @@ fun DeviceHealthScreen(
 
                 Button(
                     onClick = onContinue,
-                    enabled = status.isHealthy,
+                    enabled = status.allCriticalOk,  // Only critical items block Continue
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Continue")
                 }
             }
 
-            if (!status.isHealthy) {
+            if (!status.allCriticalOk) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Fix all issues above to continue",
+                    text = "Fix required items above to continue",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
+                )
+            } else if (!status.isHealthy) {
+                // All critical OK but battery not optimized
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Recommended: Fix battery optimization for best reliability",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -159,6 +168,13 @@ fun DeviceHealthScreen(
 
 /**
  * A single health check row with status indicator and optional fix button.
+ *
+ * @param label The name of the health check
+ * @param isOk Whether the check passes
+ * @param onFix Action to open settings to fix the issue
+ * @param description Custom description text (optional)
+ * @param isCritical If true, shows as error when not OK; if false, shows as warning/recommended
+ * @param fixButtonText Text for the fix button
  */
 @Composable
 private fun HealthCheckItem(
@@ -166,17 +182,22 @@ private fun HealthCheckItem(
     isOk: Boolean,
     onFix: () -> Unit,
     description: String? = null,
+    isCritical: Boolean = true,
     fixButtonText: String = "Fix"
 ) {
+    // Non-critical items that aren't OK show as warning (amber), not error (red)
+    val showAsWarning = !isOk && !isCritical
+    val warningColor = Color(0xFFFF9800) // Amber/Orange
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isOk) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            } else {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            containerColor = when {
+                isOk -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                showAsWarning -> Color(0xFFFFF3E0).copy(alpha = 0.5f) // Light amber
+                else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
             }
         )
     ) {
@@ -188,7 +209,11 @@ private fun HealthCheckItem(
         ) {
             // Status icon
             Text(
-                text = if (isOk) "✅" else "⚠️",
+                text = when {
+                    isOk -> "✅"
+                    showAsWarning -> "⚠️"  // Warning for non-critical
+                    else -> "❌"  // Error for critical
+                },
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -202,12 +227,12 @@ private fun HealthCheckItem(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = description ?: if (isOk) "OK" else "Fix required",
+                    text = description ?: if (isOk) "OK" else if (isCritical) "Fix required" else "Fix recommended",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isOk) {
-                        Color(0xFF4CAF50) // Green
-                    } else {
-                        MaterialTheme.colorScheme.error
+                    color = when {
+                        isOk -> Color(0xFF4CAF50) // Green
+                        showAsWarning -> warningColor // Amber
+                        else -> MaterialTheme.colorScheme.error // Red
                     }
                 )
             }
