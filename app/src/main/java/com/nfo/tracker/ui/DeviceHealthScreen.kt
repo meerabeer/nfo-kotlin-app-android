@@ -47,7 +47,8 @@ fun DeviceHealthScreen(
     onOpenBatterySettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onContinue: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToDeviceSetup: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -168,6 +169,21 @@ fun DeviceHealthScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            // Device Setup Wizard link
+            Spacer(modifier = Modifier.height(24.dp))
+            OutlinedButton(
+                onClick = onNavigateToDeviceSetup,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Open Device Setup Wizard")
+            }
+            Text(
+                text = "Get step-by-step instructions for your device",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 }

@@ -12,14 +12,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,12 +44,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.nfo.tracker.device.DeviceHealthChecker
 import com.nfo.tracker.device.DeviceHealthStatus
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.DeviceHealthScreen
+import com.nfo.tracker.ui.DeviceSetupWizardScreen
+import com.nfo.tracker.ui.DiagnosticsScreen
 import com.nfo.tracker.ui.PermissionGateScreen
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
@@ -75,6 +92,7 @@ class MainActivity : ComponentActivity() {
 /**
  * Main app flow that gates the user behind permission screen first.
  * Once location permission is granted, shows the main tracking screen.
+ * Uses NavHost for navigation to Device Setup Wizard and Diagnostics screens.
  */
 @Composable
 fun MainAppFlow() {
@@ -90,8 +108,36 @@ fun MainAppFlow() {
             }
         )
     } else {
-        // Show main tracking screen
-        TrackingScreen()
+        // Show main app with navigation
+        val navController = rememberNavController()
+
+        NavHost(
+            navController = navController,
+            startDestination = "tracking"
+        ) {
+            composable("tracking") {
+                TrackingScreen(
+                    onNavigateToDeviceSetup = {
+                        navController.navigate("device_setup_wizard")
+                    },
+                    onNavigateToDiagnostics = {
+                        navController.navigate("diagnostics")
+                    }
+                )
+            }
+
+            composable("device_setup_wizard") {
+                DeviceSetupWizardScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("diagnostics") {
+                DiagnosticsScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+        }
     }
 }
 
@@ -124,8 +170,12 @@ private fun actuallyStartShiftAndTracking(context: Context) {
     Log.d("MainActivity", "Shift started, tracking active")
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackingScreen() {
+fun TrackingScreen(
+    onNavigateToDeviceSetup: () -> Unit = {},
+    onNavigateToDiagnostics: () -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var onShift by remember { mutableStateOf(false) }
@@ -134,6 +184,9 @@ fun TrackingScreen() {
     // Device health gate state
     var showDeviceHealthScreen by remember { mutableStateOf(false) }
     var deviceHealthStatus by remember { mutableStateOf<DeviceHealthStatus?>(null) }
+
+    // Dropdown menu state
+    var showMenu by remember { mutableStateOf(false) }
 
     // Location permission launcher - requests permission before starting foreground service
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -229,7 +282,8 @@ fun TrackingScreen() {
                 Log.d("MainActivity", "Health screen: Back clicked")
                 showDeviceHealthScreen = false
                 onShift = false
-            }
+            },
+            onNavigateToDeviceSetup = onNavigateToDeviceSetup
         )
     } else {
         // Main tracking screen
@@ -239,77 +293,133 @@ fun TrackingScreen() {
             "Off shift – tracking stopped"
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "NFO Tracker (Kotlin)",
-                style = MaterialTheme.typography.titleLarge
-            )
-
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)
-            )
-
-            Button(
-                onClick = {
-                    if (!onShift) {
-                        // Going ON shift - check device health first
-                        handleGoOnShiftClicked()
-                    } else {
-                        // Going OFF shift - send final heartbeat before stopping
-                        isGoingOffShift = true
-                        coroutineScope.launch {
-                            val username = ShiftStateHelper.getUsername(context)
-                            val displayName = ShiftStateHelper.getDisplayName(context)
-
-                            Log.d("MainActivity", "Going off shift, sending final heartbeat for $username")
-
-                            // Send the off-shift heartbeat (waits for sync attempt)
-                            val syncSuccess = ShiftStateHelper.sendOffShiftHeartbeat(
-                                context = context,
-                                username = username,
-                                name = displayName
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("NFO Tracker") },
+                    actions = {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Menu"
                             )
-
-                            Log.d(
-                                "MainActivity",
-                                "Off-shift heartbeat sent, sync=${if (syncSuccess) "SUCCESS" else "PENDING"}. " +
-                                    "Stopping tracking service..."
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Device Setup") },
+                                onClick = {
+                                    showMenu = false
+                                    onNavigateToDeviceSetup()
+                                }
                             )
-
-                            // After heartbeat is written (and sync attempted), stop everything
-                            onShift = false
-                            saveOnShiftState(context, false)
-                            TrackingForegroundService.stop(context)
-                            HealthWatchdogScheduler.cancel(context)
-                            // Note: HeartbeatWorker keeps running as backup to retry failed syncs
-
-                            isGoingOffShift = false
+                            DropdownMenuItem(
+                                text = { Text("Diagnostics") },
+                                onClick = {
+                                    showMenu = false
+                                    onNavigateToDiagnostics()
+                                }
+                            )
                         }
                     }
-                },
-                enabled = !isGoingOffShift  // Disable button while going off shift
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (isGoingOffShift) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Text(
-                            text = "Ending Shift...",
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                Text(
+                    text = "NFO Tracker (Kotlin)",
+                    style = MaterialTheme.typography.titleLarge
+                )
+
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)
+                )
+
+                Button(
+                    onClick = {
+                        if (!onShift) {
+                            // Going ON shift - check device health first
+                            handleGoOnShiftClicked()
+                        } else {
+                            // Going OFF shift - send final heartbeat before stopping
+                            isGoingOffShift = true
+                            coroutineScope.launch {
+                                val username = ShiftStateHelper.getUsername(context)
+                                val displayName = ShiftStateHelper.getDisplayName(context)
+
+                                Log.d("MainActivity", "Going off shift, sending final heartbeat for $username")
+
+                                // Send the off-shift heartbeat (waits for sync attempt)
+                                val syncSuccess = ShiftStateHelper.sendOffShiftHeartbeat(
+                                    context = context,
+                                    username = username,
+                                    name = displayName
+                                )
+
+                                Log.d(
+                                    "MainActivity",
+                                    "Off-shift heartbeat sent, sync=${if (syncSuccess) "SUCCESS" else "PENDING"}. " +
+                                        "Stopping tracking service..."
+                                )
+
+                                // After heartbeat is written (and sync attempted), stop everything
+                                onShift = false
+                                saveOnShiftState(context, false)
+                                TrackingForegroundService.stop(context)
+                                HealthWatchdogScheduler.cancel(context)
+                                // Note: HeartbeatWorker keeps running as backup to retry failed syncs
+
+                                isGoingOffShift = false
+                            }
+                        }
+                    },
+                    enabled = !isGoingOffShift  // Disable button while going off shift
+                ) {
+                    if (isGoingOffShift) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = "Ending Shift...",
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    } else {
+                        Text(text = if (onShift) "Go Off Shift" else "Go On Shift")
                     }
-                } else {
-                    Text(text = if (onShift) "Go Off Shift" else "Go On Shift")
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Quick access buttons for Device Setup and Diagnostics
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                ) {
+                    Button(
+                        onClick = onNavigateToDeviceSetup
+                    ) {
+                        Text("Device Setup")
+                    }
+
+                    Button(
+                        onClick = onNavigateToDiagnostics
+                    ) {
+                        Text("Diagnostics")
+                    }
                 }
             }
         }

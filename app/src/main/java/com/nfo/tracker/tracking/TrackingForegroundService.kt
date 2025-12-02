@@ -46,6 +46,18 @@ class TrackingForegroundService : Service() {
         const val ACTION_START_FROM_WATCHDOG = "com.nfo.tracker.action.START_FROM_WATCHDOG"
         const val ACTION_START_FROM_BOOT = "com.nfo.tracker.action.START_FROM_BOOT"
 
+        /**
+         * Read-only flag indicating whether the tracking service is currently running.
+         * Used by DiagnosticsScreen to display service status.
+         */
+        @Volatile
+        private var isRunningInternal: Boolean = false
+
+        /**
+         * Returns true if the tracking service is currently running.
+         */
+        fun isRunning(): Boolean = isRunningInternal
+
         fun start(context: Context) {
             val intent = Intent(context, TrackingForegroundService::class.java).apply {
                 action = ACTION_START
@@ -186,6 +198,8 @@ class TrackingForegroundService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
                 Log.d(TAG, "startForeground called (pre-Q)")
             }
+            // Mark service as running after successful startForeground
+            isRunningInternal = true
         } catch (se: SecurityException) {
             Log.e(TAG, "SecurityException when starting location foreground service", se)
             stopSelf()
@@ -195,6 +209,8 @@ class TrackingForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        // Mark service as stopped
+        isRunningInternal = false
         stopLocationUpdates()
         serviceScope.cancel()
         super.onDestroy()
