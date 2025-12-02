@@ -58,6 +58,7 @@ import com.nfo.tracker.ui.DeviceSetupWizardScreen
 import com.nfo.tracker.ui.DiagnosticsScreen
 import com.nfo.tracker.ui.LoginScreen
 import com.nfo.tracker.ui.PermissionGateScreen
+import com.nfo.tracker.ui.ActivitySelectionScreen
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
 import com.nfo.tracker.work.HealthWatchdogScheduler
@@ -147,7 +148,16 @@ fun MainAppFlow() {
                 },
                 onNavigateToDiagnostics = {
                     navController.navigate("diagnostics")
+                },
+                onNavigateToActivity = {
+                    navController.navigate("activity")
                 }
+            )
+        }
+
+        composable("activity") {
+            ActivitySelectionScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -198,7 +208,8 @@ private fun actuallyStartShiftAndTracking(context: Context) {
 @Composable
 fun TrackingScreen(
     onNavigateToDeviceSetup: () -> Unit = {},
-    onNavigateToDiagnostics: () -> Unit = {}
+    onNavigateToDiagnostics: () -> Unit = {},
+    onNavigateToActivity: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -333,6 +344,13 @@ fun TrackingScreen(
                             onDismissRequest = { showMenu = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("Activity") },
+                                onClick = {
+                                    showMenu = false
+                                    onNavigateToActivity()
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Device Setup") },
                                 onClick = {
                                     showMenu = false
@@ -432,12 +450,23 @@ fun TrackingScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Quick access buttons for Device Setup and Diagnostics
+                // Quick access buttons for Activity, Device Setup and Diagnostics
                 // These are always visible below the main shift button
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Button(
+                        onClick = onNavigateToActivity,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Text("Activity")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     OutlinedButton(
                         onClick = onNavigateToDeviceSetup,
                         modifier = Modifier

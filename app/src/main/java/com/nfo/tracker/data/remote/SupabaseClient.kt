@@ -44,6 +44,153 @@ object SupabaseClient {
     )
 
     /**
+     * Data class representing a site from the Site_Coordinates table.
+     */
+    data class SiteDto(
+        val siteId: String,
+        val siteName: String?
+    )
+
+    /**
+     * Data class representing a warehouse from the warehouses table.
+     */
+    data class WarehouseDto(
+        val id: Long,
+        val name: String,
+        val region: String?
+    )
+
+    /**
+     * Fetches all sites from the Site_Coordinates table in Supabase.
+     *
+     * @return List of SiteDto, or empty list on error.
+     */
+    suspend fun fetchSites(): List<SiteDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = okhttp3.HttpUrl.Builder()
+                    .scheme("https")
+                    .host("rzivbeaqfhamlpsfaqov.supabase.co")
+                    .addPathSegments("rest/v1/Site_Coordinates")
+                    .addQueryParameter("select", "site_id,site_name")
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .addHeader("apikey", API_KEY)
+                    .addHeader("Authorization", "Bearer $API_KEY")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                Log.d(TAG, "Fetching sites from Site_Coordinates")
+
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val responseBody = response.body?.string()
+
+                    if (code == 200 && responseBody != null) {
+                        val jsonArray = JSONArray(responseBody)
+                        val sites = mutableListOf<SiteDto>()
+
+                        for (i in 0 until jsonArray.length()) {
+                            val row = jsonArray.getJSONObject(i)
+                            val siteId = row.optString("site_id", "")
+                            if (siteId.isNotEmpty()) {
+                                sites.add(
+                                    SiteDto(
+                                        siteId = siteId,
+                                        siteName = row.optString("site_name", null).takeIf { it.isNotEmpty() }
+                                    )
+                                )
+                            }
+                        }
+
+                        Log.d(TAG, "Fetched ${sites.size} sites")
+                        return@withContext sites
+                    } else {
+                        Log.e(TAG, "Failed to fetch sites: HTTP $code, body=$responseBody")
+                        return@withContext emptyList()
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Error fetching sites: ${e.message}", e)
+                emptyList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error fetching sites: ${e.message}", e)
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Fetches active warehouses from the warehouses table in Supabase.
+     *
+     * @return List of WarehouseDto, or empty list on error.
+     */
+    suspend fun fetchWarehouses(): List<WarehouseDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = okhttp3.HttpUrl.Builder()
+                    .scheme("https")
+                    .host("rzivbeaqfhamlpsfaqov.supabase.co")
+                    .addPathSegments("rest/v1/warehouses")
+                    .addQueryParameter("select", "id,name,region,is_active")
+                    .addQueryParameter("is_active", "eq.true")
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .addHeader("apikey", API_KEY)
+                    .addHeader("Authorization", "Bearer $API_KEY")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                Log.d(TAG, "Fetching warehouses")
+
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val responseBody = response.body?.string()
+
+                    if (code == 200 && responseBody != null) {
+                        val jsonArray = JSONArray(responseBody)
+                        val warehouses = mutableListOf<WarehouseDto>()
+
+                        for (i in 0 until jsonArray.length()) {
+                            val row = jsonArray.getJSONObject(i)
+                            val id = row.optLong("id", -1L)
+                            val name = row.optString("name", "")
+
+                            if (id >= 0 && name.isNotEmpty()) {
+                                warehouses.add(
+                                    WarehouseDto(
+                                        id = id,
+                                        name = name,
+                                        region = row.optString("region", null).takeIf { it.isNotEmpty() }
+                                    )
+                                )
+                            }
+                        }
+
+                        Log.d(TAG, "Fetched ${warehouses.size} warehouses")
+                        return@withContext warehouses
+                    } else {
+                        Log.e(TAG, "Failed to fetch warehouses: HTTP $code, body=$responseBody")
+                        return@withContext emptyList()
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Error fetching warehouses: ${e.message}", e)
+                emptyList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error fetching warehouses: ${e.message}", e)
+                emptyList()
+            }
+        }
+    }
+
+    /**
      * Authenticates a user against the NFOUsers table in Supabase.
      *
      * @param username The username to authenticate.
