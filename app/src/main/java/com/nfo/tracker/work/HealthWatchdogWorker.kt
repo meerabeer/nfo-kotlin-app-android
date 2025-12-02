@@ -19,26 +19,25 @@ import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.tracking.TrackingForegroundService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
 
 /**
  * Health Watchdog Worker for Uber-style reliability.
  *
  * This worker runs periodically while the user is "on shift" and monitors
  * the heartbeat stream. If no heartbeat has been recorded for more than
- * [WATCHDOG_STALE_MINUTES], it assumes the tracking service has died
- * and attempts to restart it.
+ * [STALE_THRESHOLD_MILLIS] (3 minutes), it assumes the tracking service has died
+ * and attempts recovery.
  *
  * Behaviour:
- * - If not on shift → no-op, returns success.
- * - If on shift and heartbeat is fresh → logs healthy, sets tracking_healthy=true.
+ * - If not on shift → no-op, returns success (no reschedule).
+ * - If on shift and heartbeat is fresh → logs HEALTHY, sets tracking_healthy=true.
  * - If on shift and heartbeat is stale → marks NFO as "device-silent" in local DB,
- *   triggers sync, restarts [TrackingForegroundService], sets tracking_healthy=false.
- * - On transition from healthy→stale (with cooldown): shows a notification to the user
+ *   triggers sync to Supabase, restarts [TrackingForegroundService], sets tracking_healthy=false.
+ * - On stale detection (with cooldown): shows a notification to the user
  *   prompting them to reopen the app.
  *
  * The "device-silent" status will be synced to Supabase when network is available,
- * allowing the manager dashboard to see that the NFO's device went silent.
+ * ensuring the manager dashboard never sees a stale NFO as "available".
  *
  * This uses a self-rescheduling OneTimeWorkRequest pattern to achieve
  * ~1 minute check intervals (WorkManager's PeriodicWork minimum is 15 min).
@@ -54,11 +53,11 @@ class HealthWatchdogWorker(
         /** How often we want to check (used for self-rescheduling delay). */
         const val WATCHDOG_INTERVAL_MINUTES = 1L
 
-        /** If no heartbeat for this long (in minutes), treat tracking as stale. */
-        const val WATCHDOG_STALE_MINUTES = 3L
+        /** Stale threshold in milliseconds (3 minutes). */
+        private const val STALE_THRESHOLD_MILLIS = 3 * 60 * 1000L
 
         /** Cooldown before showing another stale notification (10 minutes). */
-        private const val REACTION_COOLDOWN_MILLIS = 10 * 60 * 1000L
+        private const val STALE_NOTIFICATION_COOLDOWN_MILLIS = 10 * 60 * 1000L
 
         /** Unique work name for WorkManager. */
         const val WATCHDOG_UNIQUE_WORK_NAME = "health_watchdog_work"
@@ -78,130 +77,104 @@ class HealthWatchdogWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Watchdog check started")
+            Log.d(TAG, "Watchdog: check started")
 
-            // 1. Check if user is on shift
+            // 1. Read on_shift from nfo_tracker_prefs
             val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val isOnShift = prefs.getBoolean(KEY_ON_SHIFT, false)
 
             if (!isOnShift) {
-                Log.d(TAG, "Not on shift, skipping watchdog check")
-                // Don't reschedule if not on shift
+                Log.d(TAG, "Watchdog: user not on shift → skipping check")
+                // Don't reschedule if not on shift; let scheduler decide when to start again
                 return@withContext Result.success()
             }
 
-            // 2. Query the latest heartbeat from Room
-            val db = HeartbeatDatabase.getInstance(applicationContext)
-            val dao = db.heartbeatDao()
-            val lastHeartbeat = dao.getLastHeartbeat()
-
+            // 2. Read health watchdog state
             val healthPrefs = applicationContext.getSharedPreferences(HEALTH_PREFS_NAME, Context.MODE_PRIVATE)
-
-            // Read previous state for transition detection
             val wasHealthy = healthPrefs.getBoolean(KEY_TRACKING_HEALTHY, true)
             val lastReactionAt = healthPrefs.getLong(KEY_LAST_STALE_REACTION_AT, 0L)
             val now = System.currentTimeMillis()
 
+            // 3. Query the latest heartbeat from Room
+            val db = HeartbeatDatabase.getInstance(applicationContext)
+            val dao = db.heartbeatDao()
+            val lastHeartbeat = dao.getLastHeartbeat()
+
             if (lastHeartbeat == null) {
-                Log.w(TAG, "On shift but no heartbeat found in DB. Service may not have started yet.")
-
-                // Check for healthy→stale transition and react if cooldown passed
-                val canReact = (now - lastReactionAt) > REACTION_COOLDOWN_MILLIS
-                if (wasHealthy && canReact) {
-                    Log.d(TAG, "Transition: healthy → stale (no heartbeat). Triggering reaction.")
-                    showStaleNotification()
-                    healthPrefs.edit { putLong(KEY_LAST_STALE_REACTION_AT, now) }
-                }
-
-                // Mark as unhealthy since we have no heartbeat data
+                Log.w(TAG, "Watchdog: no heartbeat found → cannot evaluate, skipping")
+                // Mark as unhealthy since we have no data, but don't trigger full stale reaction
                 healthPrefs.edit { putBoolean(KEY_TRACKING_HEALTHY, false) }
-
-                // Attempt to start service just in case
+                // Attempt to start service just in case it never started
                 restartTrackingService()
                 rescheduleWatchdog()
-                Log.d(TAG, "Watchdog check finished: UNHEALTHY (no heartbeat in DB)")
                 return@withContext Result.success()
             }
 
-            // 3. Compute time difference
-            val lastHeartbeatTime = lastHeartbeat.createdAtLocal
-            val diffMillis = now - lastHeartbeatTime
-            val diffMinutes = TimeUnit.MILLISECONDS.toMinutes(diffMillis)
-            val diffSeconds = TimeUnit.MILLISECONDS.toSeconds(diffMillis)
-            val thresholdMillis = WATCHDOG_STALE_MINUTES * 60_000L
+            // 4. Compute age of last heartbeat
+            val ageMillis = now - lastHeartbeat.createdAtLocal
+            val isHealthy = ageMillis < STALE_THRESHOLD_MILLIS
 
             Log.d(
                 TAG,
-                "Last heartbeat: id=${lastHeartbeat.localId}, username=${lastHeartbeat.username}, " +
-                    "age=${diffMinutes}m ${diffSeconds % 60}s, synced=${lastHeartbeat.synced}, " +
-                    "threshold=${WATCHDOG_STALE_MINUTES}m"
+                "Watchdog: lastHeartbeat id=${lastHeartbeat.localId}, username=${lastHeartbeat.username}, " +
+                    "ageMillis=$ageMillis, threshold=$STALE_THRESHOLD_MILLIS, synced=${lastHeartbeat.synced}"
             )
 
-            // 4. Check if stale
-            val isHealthy = diffMillis < thresholdMillis
-
-            if (!isHealthy) {
-                Log.w(
-                    TAG,
-                    "Heartbeat STALE! Last seen ${diffMinutes}m ${diffSeconds % 60}s ago. " +
-                        "Marking as device-silent and restarting tracking service..."
-                )
-
-                // Check for healthy→stale transition and react if cooldown passed
-                val canReact = (now - lastReactionAt) > REACTION_COOLDOWN_MILLIS
-                if (wasHealthy && canReact) {
-                    Log.d(TAG, "Transition: healthy → stale. Triggering reaction (notification + restart).")
-                    showStaleNotification()
-                    healthPrefs.edit { putLong(KEY_LAST_STALE_REACTION_AT, now) }
-                } else if (!canReact) {
-                    val cooldownRemaining = TimeUnit.MILLISECONDS.toMinutes(REACTION_COOLDOWN_MILLIS - (now - lastReactionAt))
-                    Log.d(TAG, "Still stale but within cooldown (${cooldownRemaining}m remaining). Skipping notification.")
-                }
-
-                // Mark tracking as unhealthy
+            if (isHealthy) {
+                // ═══════════════════════════════════════════════════════════════
+                // HEALTHY PATH
+                // ═══════════════════════════════════════════════════════════════
+                healthPrefs.edit { putBoolean(KEY_TRACKING_HEALTHY, true) }
+                Log.d(TAG, "Watchdog: HEALTHY; age=${ageMillis}ms")
+                // Do NOT modify heartbeat or service
+            } else {
+                // ═══════════════════════════════════════════════════════════════
+                // STALE PATH
+                // ═══════════════════════════════════════════════════════════════
                 healthPrefs.edit { putBoolean(KEY_TRACKING_HEALTHY, false) }
+                Log.w(TAG, "Watchdog: STALE; age=${ageMillis}ms, attempting recovery")
 
-                // Update the heartbeat row to "device-silent" status so it gets synced to Supabase
-                val staleHeartbeat = lastHeartbeat.copy(
+                // 4a. Mark device-silent in Room
+                val updated = lastHeartbeat.copy(
                     status = "device-silent",
                     lastActiveSource = "watchdog",
                     lastActiveAt = now,
                     updatedAt = now,
                     synced = false  // Mark as unsynced so HeartbeatWorker will pick it up
                 )
-                dao.upsert(staleHeartbeat)
-                Log.d(TAG, "Updated heartbeat to device-silent status, synced=false")
+                dao.upsert(updated)
+                Log.d(TAG, "Watchdog: updated heartbeat to status='device-silent', synced=false")
 
-                // Trigger immediate sync attempt (will run when network available)
+                // 4b. Trigger immediate sync to Supabase
                 HeartbeatSyncHelper.enqueueImmediateSync(applicationContext)
+                Log.d(TAG, "Watchdog: enqueued immediate sync for device-silent status")
 
-                // Attempt to restart the tracking service
+                // 4c. Restart the tracking service
                 restartTrackingService()
 
-                Log.d(TAG, "Watchdog check finished: UNHEALTHY (stale heartbeat, marked device-silent)")
-            } else {
-                Log.d(
-                    TAG,
-                    "Heartbeat healthy (age=${diffSeconds}s, threshold=${WATCHDOG_STALE_MINUTES * 60}s). Tracking is alive."
-                )
-
-                // Mark tracking as healthy
-                healthPrefs.edit { putBoolean(KEY_TRACKING_HEALTHY, true) }
-
-                Log.d(TAG, "Watchdog check finished: HEALTHY")
+                // 4d. Show notification if cooldown has passed
+                val canShowNotification = (now - lastReactionAt) > STALE_NOTIFICATION_COOLDOWN_MILLIS
+                if (canShowNotification) {
+                    showStaleNotification()
+                    healthPrefs.edit { putLong(KEY_LAST_STALE_REACTION_AT, now) }
+                    Log.w(TAG, "Watchdog: Showing stale notification to user")
+                } else {
+                    val cooldownRemainingMs = STALE_NOTIFICATION_COOLDOWN_MILLIS - (now - lastReactionAt)
+                    Log.d(TAG, "Watchdog: Stale but notification cooldown active; skipping alert (${cooldownRemainingMs}ms remaining)")
+                }
             }
 
-            // 5. Reschedule self for next check (only if still on shift)
+            // 5. Reschedule watchdog for next check
             rescheduleWatchdog()
 
             Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Watchdog error: ${e.message}", e)
+            Log.e(TAG, "Watchdog: error during check: ${e.message}", e)
             // Still reschedule even on error, but return success to avoid retry hammering
             try {
                 rescheduleWatchdog()
             } catch (re: Exception) {
-                Log.e(TAG, "Failed to reschedule watchdog: ${re.message}", re)
+                Log.e(TAG, "Watchdog: failed to reschedule: ${re.message}", re)
             }
             Result.success()
         }
@@ -211,11 +184,9 @@ class HealthWatchdogWorker(
      * Shows a notification to the NFO when tracking becomes stale.
      * Prompts user to reopen the app to resume tracking.
      *
-     * Reuses the same notification channel as [TrackingForegroundService].
+     * Uses the same notification channel as [TrackingForegroundService].
      */
     private fun showStaleNotification() {
-        Log.d(TAG, "Showing stale tracking notification")
-
         val context = applicationContext
 
         // Ensure notification channel exists (required for Android O+)
@@ -229,6 +200,7 @@ class HealthWatchdogWorker(
                     NotificationManager.IMPORTANCE_HIGH  // Higher importance for alert
                 )
                 notificationManager.createNotificationChannel(channel)
+                Log.d(TAG, "Watchdog: created notification channel ${TrackingForegroundService.CHANNEL_ID}")
             }
         }
 
@@ -255,10 +227,10 @@ class HealthWatchdogWorker(
 
         try {
             NotificationManagerCompat.from(context).notify(STALE_NOTIFICATION_ID, notification)
-            Log.d(TAG, "Stale notification shown successfully")
+            Log.d(TAG, "Watchdog: stale notification shown successfully (id=$STALE_NOTIFICATION_ID)")
         } catch (e: SecurityException) {
             // Notification permission might be denied on Android 13+
-            Log.w(TAG, "Could not show notification: ${e.message}")
+            Log.w(TAG, "Watchdog: could not show notification (permission denied): ${e.message}")
         }
     }
 
@@ -267,16 +239,16 @@ class HealthWatchdogWorker(
      * so the service can log and handle watchdog-initiated restarts.
      */
     private fun restartTrackingService() {
-        val appContext = applicationContext
-        val intent = Intent(appContext, TrackingForegroundService::class.java).apply {
+        val context = applicationContext
+        val intent = Intent(context, TrackingForegroundService::class.java).apply {
             action = TrackingForegroundService.ACTION_START_FROM_WATCHDOG
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(appContext, intent)
+            ContextCompat.startForegroundService(context, intent)
         } else {
-            appContext.startService(intent)
+            context.startService(intent)
         }
-        Log.d(TAG, "Sent restart intent to TrackingForegroundService")
+        Log.w(TAG, "Watchdog: Requested restart of TrackingForegroundService from watchdog")
     }
 
     /**
