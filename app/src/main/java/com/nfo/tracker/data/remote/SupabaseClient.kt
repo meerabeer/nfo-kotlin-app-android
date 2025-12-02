@@ -62,65 +62,87 @@ object SupabaseClient {
 
     /**
      * Fetches all sites from the Site_Coordinates table in Supabase.
+     * Uses pagination (offset/limit) to retrieve more than the default 1000 row limit.
      *
      * @return List of SiteDto, or empty list on error.
      */
     suspend fun fetchSites(): List<SiteDto> {
         return withContext(Dispatchers.IO) {
-            try {
-                val url = okhttp3.HttpUrl.Builder()
-                    .scheme("https")
-                    .host("rzivbeaqfhamlpsfaqov.supabase.co")
-                    .addPathSegments("rest/v1/Site_Coordinates")
-                    .addQueryParameter("select", "site_id,site_name")
-                    .addQueryParameter("limit", "5000")
-                    .build()
+            val allSites = mutableListOf<SiteDto>()
+            val pageSize = 1000
+            var offset = 0
+            val maxRows = 5000  // Safety cap to avoid infinite loops
 
-                val request = Request.Builder()
-                    .url(url)
-                    .get()
-                    .addHeader("apikey", API_KEY)
-                    .addHeader("Authorization", "Bearer $API_KEY")
-                    .addHeader("Content-Type", "application/json")
-                    .build()
+            Log.d(TAG, "fetchSites() starting paginated fetch (pageSize=$pageSize, maxRows=$maxRows)")
 
-                Log.d(TAG, "Fetching sites from Site_Coordinates")
+            while (offset < maxRows) {
+                try {
+                    val url = okhttp3.HttpUrl.Builder()
+                        .scheme("https")
+                        .host("rzivbeaqfhamlpsfaqov.supabase.co")
+                        .addPathSegments("rest/v1/Site_Coordinates")
+                        .addQueryParameter("select", "site_id,site_name")
+                        .addQueryParameter("limit", pageSize.toString())
+                        .addQueryParameter("offset", offset.toString())
+                        .build()
 
-                client.newCall(request).execute().use { response ->
-                    val code = response.code
-                    val responseBody = response.body?.string()
+                    val request = Request.Builder()
+                        .url(url)
+                        .get()
+                        .addHeader("apikey", API_KEY)
+                        .addHeader("Authorization", "Bearer $API_KEY")
+                        .addHeader("Content-Type", "application/json")
+                        .build()
 
-                    if (code == 200 && responseBody != null) {
-                        val jsonArray = JSONArray(responseBody)
-                        val sites = mutableListOf<SiteDto>()
+                    Log.d(TAG, "fetchSites() page request: offset=$offset, limit=$pageSize, URL=$url")
 
-                        for (i in 0 until jsonArray.length()) {
-                            val row = jsonArray.getJSONObject(i)
-                            val siteId = row.optString("site_id", "")
-                            if (siteId.isNotEmpty()) {
-                                sites.add(
-                                    SiteDto(
-                                        siteId = siteId,
-                                        siteName = row.optString("site_name", null).takeIf { it.isNotEmpty() }
+                    client.newCall(request).execute().use { response ->
+                        val code = response.code
+                        val responseBody = response.body?.string()
+
+                        if (code == 200 && responseBody != null) {
+                            val jsonArray = JSONArray(responseBody)
+                            val pageSites = mutableListOf<SiteDto>()
+
+                            for (i in 0 until jsonArray.length()) {
+                                val row = jsonArray.getJSONObject(i)
+                                val siteId = row.optString("site_id", "")
+                                if (siteId.isNotEmpty()) {
+                                    pageSites.add(
+                                        SiteDto(
+                                            siteId = siteId,
+                                            siteName = row.optString("site_name", null).takeIf { it.isNotEmpty() }
+                                        )
                                     )
-                                )
+                                }
                             }
-                        }
 
-                        Log.d(TAG, "Fetched ${sites.size} sites")
-                        return@withContext sites
-                    } else {
-                        Log.e(TAG, "Failed to fetch sites: HTTP $code, body=$responseBody")
-                        return@withContext emptyList()
+                            Log.d(TAG, "fetchSites() page offset=$offset returned ${pageSites.size} rows")
+                            allSites.addAll(pageSites)
+
+                            // If we got fewer rows than pageSize, we've reached the end
+                            if (pageSites.size < pageSize) {
+                                Log.d(TAG, "fetchSites() reached end of data (got ${pageSites.size} < $pageSize)")
+                                break
+                            }
+
+                            offset += pageSize
+                        } else {
+                            Log.e(TAG, "fetchSites() page request failed: HTTP $code, body=$responseBody")
+                            break  // Stop pagination on error, return what we have
+                        }
                     }
+                } catch (e: IOException) {
+                    Log.e(TAG, "fetchSites() page request error: ${e.message}", e)
+                    break  // Stop pagination on error, return what we have
+                } catch (e: Exception) {
+                    Log.e(TAG, "fetchSites() unexpected error: ${e.message}", e)
+                    break  // Stop pagination on error, return what we have
                 }
-            } catch (e: IOException) {
-                Log.e(TAG, "Error fetching sites: ${e.message}", e)
-                emptyList()
-            } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error fetching sites: ${e.message}", e)
-                emptyList()
             }
+
+            Log.d(TAG, "fetchSites() returned ${allSites.size} rows total (paged)")
+            allSites
         }
     }
 
