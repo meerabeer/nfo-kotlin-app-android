@@ -1,22 +1,28 @@
 package com.nfo.tracker
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.work.HealthWatchdogScheduler
 
 /**
  * BroadcastReceiver that handles device boot completion.
  *
- * If the NFO was "on shift" when the device rebooted, this receiver
- * schedules the health watchdog to detect the stale state and notify the user.
+ * If the NFO was "on shift" when the device rebooted, this receiver:
+ * 1. Shows a normal notification prompting the user to reopen the app.
+ * 2. Schedules the health watchdog to detect stale state and sync "device-silent" to Supabase.
  *
  * NOTE: We intentionally do NOT start the TrackingForegroundService from here.
  * Android 13+ restricts starting foreground services with type=location from
- * background contexts like BOOT_COMPLETED. Instead, the watchdog will:
- * - Mark the NFO as "device-silent" in Room/Supabase
- * - Show a notification prompting the user to reopen the app
+ * background contexts like BOOT_COMPLETED.
  *
  * Requires RECEIVE_BOOT_COMPLETED permission in AndroidManifest.xml.
  */
@@ -28,6 +34,9 @@ class BootReceiver : BroadcastReceiver() {
         /** SharedPreferences file for tracking state (same as MainActivity). */
         private const val PREFS_NAME = "nfo_tracker_prefs"
         private const val KEY_ON_SHIFT = "on_shift"
+
+        /** Notification ID for reboot alert (distinct from FGS=1001 and stale=1002). */
+        private const val REBOOT_NOTIFICATION_ID = 1003
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -48,19 +57,66 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         // User was on shift when device rebooted.
-        // We cannot start a foreground service with type=location from BOOT_COMPLETED
-        // on Android 13+ (SecurityException). Instead, schedule the watchdog which will:
-        // 1. Detect stale heartbeat
-        // 2. Mark status as "device-silent" in Room
-        // 3. Sync to Supabase
-        // 4. Show notification prompting user to reopen app
-        Log.w(TAG, "BootReceiver: Device rebooted while on shift → scheduling watchdog only (no auto tracking restart)")
+        Log.w(TAG, "BootReceiver: Device rebooted while on shift → posting reboot notification and scheduling watchdog")
 
+        // 1. Show a normal notification prompting user to reopen app
+        showRebootNotification(context)
+
+        // 2. Schedule the watchdog to detect stale heartbeat and sync "device-silent" to Supabase
         HealthWatchdogScheduler.scheduleOneTime(context)
 
-        Log.d(TAG, "BootReceiver: Watchdog scheduled. User must reopen app to resume tracking.")
+        Log.d(TAG, "BootReceiver: Reboot notification posted (id=$REBOOT_NOTIFICATION_ID) and watchdog scheduled")
+    }
 
-        // TODO: If we want to show a non-FGS notification from boot (e.g., "Tracking paused after reboot"),
-        // we can do that here safely since regular notifications don't have the same restrictions.
+    /**
+     * Shows a normal (non-foreground) notification informing the user that tracking
+     * paused after reboot and they need to reopen the app.
+     *
+     * Uses the same channel as [TrackingForegroundService] to keep notifications grouped.
+     */
+    private fun showRebootNotification(context: Context) {
+        // Ensure notification channel exists (required for Android O+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val existingChannel = notificationManager.getNotificationChannel(TrackingForegroundService.CHANNEL_ID)
+            if (existingChannel == null) {
+                val channel = NotificationChannel(
+                    TrackingForegroundService.CHANNEL_ID,
+                    TrackingForegroundService.CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_HIGH
+                )
+                notificationManager.createNotificationChannel(channel)
+                Log.d(TAG, "BootReceiver: Created notification channel ${TrackingForegroundService.CHANNEL_ID}")
+            }
+        }
+
+        // Intent to open MainActivity when user taps the notification
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, TrackingForegroundService.CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("NFO Tracker")
+            .setContentText("Device rebooted while on shift. Please open NFO Tracker to resume tracking.")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(REBOOT_NOTIFICATION_ID, notification)
+            Log.d(TAG, "BootReceiver: Reboot notification shown successfully")
+        } catch (e: SecurityException) {
+            // Notification permission might be denied on Android 13+
+            Log.w(TAG, "BootReceiver: Could not show notification (permission denied): ${e.message}")
+        }
     }
 }
