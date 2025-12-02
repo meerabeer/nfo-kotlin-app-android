@@ -100,19 +100,25 @@ class TrackingForegroundService : Service() {
 
         when (intent?.action) {
             ACTION_START -> {
+                // User-initiated start (e.g., tapped "Go On Shift" in MainActivity)
+                // This is the ONLY path that should start location tracking.
                 Log.d(TAG, "Starting tracking (user initiated)")
                 startForegroundWithType()
                 startLocationUpdates()
             }
             ACTION_START_FROM_WATCHDOG -> {
-                Log.w(TAG, "Restarting tracking (watchdog initiated - service was stale)")
-                startForegroundWithType()
-                startLocationUpdates()
+                // NO-OP: Android 13+ restricts starting FGS with type=location from WorkManager.
+                // The watchdog now only marks device-silent and shows a notification.
+                Log.w(TAG, "ACTION_START_FROM_WATCHDOG received but ignored (Android 13+ restriction). User must reopen app.")
+                stopSelf()
+                return START_NOT_STICKY
             }
             ACTION_START_FROM_BOOT -> {
-                Log.w(TAG, "Service: Started by BootReceiver (ACTION_START_FROM_BOOT)")
-                startForegroundWithType()
-                startLocationUpdates()
+                // NO-OP: Android 13+ restricts starting FGS with type=location from BOOT_COMPLETED.
+                // BootReceiver now only schedules the watchdog.
+                Log.w(TAG, "ACTION_START_FROM_BOOT received but ignored (Android 13+ restriction). User must reopen app.")
+                stopSelf()
+                return START_NOT_STICKY
             }
             ACTION_STOP -> {
                 Log.d(TAG, "Stopping tracking")

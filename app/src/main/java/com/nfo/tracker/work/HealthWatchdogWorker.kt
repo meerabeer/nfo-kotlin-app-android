@@ -9,7 +9,6 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -25,16 +24,19 @@ import kotlinx.coroutines.withContext
  *
  * This worker runs periodically while the user is "on shift" and monitors
  * the heartbeat stream. If no heartbeat has been recorded for more than
- * [STALE_THRESHOLD_MILLIS] (3 minutes), it assumes the tracking service has died
- * and attempts recovery.
+ * [STALE_THRESHOLD_MILLIS] (3 minutes), it assumes the tracking service has died.
  *
  * Behaviour:
  * - If not on shift → no-op, returns success (no reschedule).
  * - If on shift and heartbeat is fresh → logs HEALTHY, sets tracking_healthy=true.
  * - If on shift and heartbeat is stale → marks NFO as "device-silent" in local DB,
- *   triggers sync to Supabase, restarts [TrackingForegroundService], sets tracking_healthy=false.
- * - On stale detection (with cooldown): shows a notification to the user
- *   prompting them to reopen the app.
+ *   triggers sync to Supabase, sets tracking_healthy=false, and shows a notification
+ *   prompting the user to reopen the app.
+ *
+ * NOTE: The watchdog intentionally does NOT restart the TrackingForegroundService.
+ * Android 13+ restricts starting foreground services with type=location from
+ * background contexts like WorkManager. The user must manually reopen the app
+ * to resume tracking.
  *
  * The "device-silent" status will be synced to Supabase when network is available,
  * ensuring the manager dashboard never sees a stale NFO as "available".
@@ -104,8 +106,9 @@ class HealthWatchdogWorker(
                 Log.w(TAG, "Watchdog: no heartbeat found → cannot evaluate, skipping")
                 // Mark as unhealthy since we have no data, but don't trigger full stale reaction
                 healthPrefs.edit { putBoolean(KEY_TRACKING_HEALTHY, false) }
-                // Attempt to start service just in case it never started
-                restartTrackingService()
+                // NOTE: We do NOT attempt to start the service here.
+                // Android 13+ restricts starting FGS with type=location from background.
+                // User must reopen app to start tracking.
                 rescheduleWatchdog()
                 return@withContext Result.success()
             }
@@ -149,10 +152,11 @@ class HealthWatchdogWorker(
                 HeartbeatSyncHelper.enqueueImmediateSync(applicationContext)
                 Log.d(TAG, "Watchdog: enqueued immediate sync for device-silent status")
 
-                // 4c. Restart the tracking service
-                restartTrackingService()
+                // NOTE: We do NOT restart the TrackingForegroundService here.
+                // Android 13+ restricts starting FGS with type=location from WorkManager.
+                // User must reopen app to resume tracking.
 
-                // 4d. Show notification if cooldown has passed
+                // 4c. Show notification if cooldown has passed
                 val canShowNotification = (now - lastReactionAt) > STALE_NOTIFICATION_COOLDOWN_MILLIS
                 if (canShowNotification) {
                     showStaleNotification()
@@ -232,23 +236,6 @@ class HealthWatchdogWorker(
             // Notification permission might be denied on Android 13+
             Log.w(TAG, "Watchdog: could not show notification (permission denied): ${e.message}")
         }
-    }
-
-    /**
-     * Restarts the [TrackingForegroundService] using a dedicated action
-     * so the service can log and handle watchdog-initiated restarts.
-     */
-    private fun restartTrackingService() {
-        val context = applicationContext
-        val intent = Intent(context, TrackingForegroundService::class.java).apply {
-            action = TrackingForegroundService.ACTION_START_FROM_WATCHDOG
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(context, intent)
-        } else {
-            context.startService(intent)
-        }
-        Log.w(TAG, "Watchdog: Requested restart of TrackingForegroundService from watchdog")
     }
 
     /**
