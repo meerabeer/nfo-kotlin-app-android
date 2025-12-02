@@ -143,7 +143,6 @@ object SupabaseClient {
                 put("status", heartbeat.status ?: JSONObject.NULL)
                 put("activity", heartbeat.activity ?: JSONObject.NULL)
                 put("site_id", heartbeat.siteId ?: JSONObject.NULL)
-                put("work_order_id", heartbeat.workOrderId ?: JSONObject.NULL)
                 put("lat", heartbeat.lat ?: JSONObject.NULL)
                 put("lng", heartbeat.lng ?: JSONObject.NULL)
 
