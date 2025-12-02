@@ -134,6 +134,8 @@ class TrackingForegroundService : Service() {
             }
             ACTION_STOP -> {
                 Log.d(TAG, "Stopping tracking")
+                // Mark service as stopped immediately
+                isRunningInternal = false
                 stopLocationUpdates()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
