@@ -89,38 +89,44 @@ fun DeviceHealthScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Health check items
+            // Health check items - CRITICAL (required)
             HealthCheckItem(
                 label = "Location Permission",
-                isOk = status.hasFineLocationPermission,
-                onFix = onOpenAppSettings
-            )
-
-            HealthCheckItem(
-                label = "Background Location",
-                isOk = status.hasBackgroundLocationPermission,
+                isOk = status.hasLocationPermission,
+                isCritical = true,
                 onFix = onOpenAppSettings
             )
 
             HealthCheckItem(
                 label = "Location Enabled",
                 isOk = status.isLocationEnabled,
+                isCritical = true,
                 onFix = onOpenLocationSettings
             )
 
             HealthCheckItem(
-                label = "Battery Optimization",
-                description = if (status.isIgnoringBatteryOptimizations) "Unrestricted" else "Fix recommended",
-                isOk = status.isIgnoringBatteryOptimizations,
-                isCritical = false,  // Battery is recommended, not required
-                onFix = onOpenBatterySettings
+                label = "Network Connection",
+                isOk = status.isNetworkOk,
+                isCritical = true,
+                onFix = onRefresh,
+                fixButtonText = "Retry"
+            )
+
+            // RECOMMENDED (not required)
+            HealthCheckItem(
+                label = "Background Location",
+                description = if (status.hasBackgroundLocationPermission) "OK" else "Fix recommended",
+                isOk = status.hasBackgroundLocationPermission,
+                isCritical = false,  // Recommended, not required
+                onFix = onOpenAppSettings
             )
 
             HealthCheckItem(
-                label = "Network Connection",
-                isOk = status.hasNetworkConnection,
-                onFix = onRefresh,
-                fixButtonText = "Retry"
+                label = "Battery Optimization",
+                description = if (status.isBatteryOptimizationOk) "Unrestricted" else "Fix recommended",
+                isOk = status.isBatteryOptimizationOk,
+                isCritical = false,  // Recommended, not required
+                onFix = onOpenBatterySettings
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -153,11 +159,11 @@ fun DeviceHealthScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
-            } else if (!status.isHealthy) {
-                // All critical OK but battery not optimized
+            } else if (!status.isBatteryOptimizationOk || !status.hasBackgroundLocationPermission) {
+                // All critical OK but some recommended items not fixed
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Recommended: Fix battery optimization for best reliability",
+                    text = "Recommended: Fix battery / background location for best reliability",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -255,11 +261,11 @@ fun DeviceHealthScreenPreview_AllOk() {
     NfoKotlinAppTheme {
         DeviceHealthScreen(
             status = DeviceHealthStatus(
-                hasFineLocationPermission = true,
+                hasLocationPermission = true,
                 hasBackgroundLocationPermission = true,
                 isLocationEnabled = true,
-                isIgnoringBatteryOptimizations = true,
-                hasNetworkConnection = true
+                isBatteryOptimizationOk = true,
+                isNetworkOk = true
             ),
             onRefresh = {},
             onOpenLocationSettings = {},
@@ -277,11 +283,11 @@ fun DeviceHealthScreenPreview_SomeIssues() {
     NfoKotlinAppTheme {
         DeviceHealthScreen(
             status = DeviceHealthStatus(
-                hasFineLocationPermission = true,
+                hasLocationPermission = true,
                 hasBackgroundLocationPermission = false,
                 isLocationEnabled = true,
-                isIgnoringBatteryOptimizations = false,
-                hasNetworkConnection = true
+                isBatteryOptimizationOk = false,
+                isNetworkOk = true
             ),
             onRefresh = {},
             onOpenLocationSettings = {},
