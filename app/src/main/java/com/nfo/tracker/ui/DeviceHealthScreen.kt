@@ -170,11 +170,13 @@ fun DeviceHealthScreen(
                 )
             }
 
-            // Device Setup Wizard link
+            // Device Setup Wizard link - always visible
             Spacer(modifier = Modifier.height(24.dp))
-            OutlinedButton(
+            Button(
                 onClick = onNavigateToDeviceSetup,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
             ) {
                 Text("Open Device Setup Wizard")
             }

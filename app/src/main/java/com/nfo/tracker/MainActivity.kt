@@ -28,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -405,18 +406,27 @@ fun TrackingScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Quick access buttons for Device Setup and Diagnostics
-                Row(
+                // These are always visible below the main shift button
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Button(
-                        onClick = onNavigateToDeviceSetup
+                    OutlinedButton(
+                        onClick = onNavigateToDeviceSetup,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
                     ) {
                         Text("Device Setup")
                     }
 
-                    Button(
-                        onClick = onNavigateToDiagnostics
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = onNavigateToDiagnostics,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
                     ) {
                         Text("Diagnostics")
                     }
