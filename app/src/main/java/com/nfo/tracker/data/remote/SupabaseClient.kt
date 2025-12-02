@@ -23,7 +23,7 @@ object SupabaseClient {
     private const val BASE_URL = "https://rzivbeaqfhamlpsfaqov.supabase.co"
     private const val API_KEY = "sb_publishable_Kifo4X6qxs6nkv7yilHRkA_7RapeV4a"
     private const val TABLE_ENDPOINT = "$BASE_URL/rest/v1/nfo_status?on_conflict=username"
-    private const val NFOUSERS_ENDPOINT = "$BASE_URL/rest/v1/NFOUsers"
+    private const val NFOUSERS_ENDPOINT = "$BASE_URL/rest/v1/NFOusers"
 
     private val client = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
