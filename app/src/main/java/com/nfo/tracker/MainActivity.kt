@@ -191,6 +191,14 @@ private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
 }
 
 /**
+ * Reads the on-shift state from SharedPreferences.
+ */
+private fun readOnShiftState(context: Context): Boolean {
+    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(KEY_ON_SHIFT, false)
+}
+
+/**
  * Actually starts the shift and tracking services.
  * This should only be called after all device health checks pass.
  */
@@ -213,7 +221,10 @@ fun TrackingScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var onShift by remember { mutableStateOf(false) }
+
+    // Initialize onShift from persisted SharedPreferences value
+    // This ensures the UI reflects the correct state when navigating back from other screens
+    var onShift by remember { mutableStateOf(readOnShiftState(context)) }
     var isGoingOffShift by remember { mutableStateOf(false) }  // Loading state for off-shift
 
     // Device health gate state
