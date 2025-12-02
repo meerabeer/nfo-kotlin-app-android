@@ -102,6 +102,18 @@ fun ActivitySelectionScreen(
 
     // Site search/filter state
     var siteSearchQuery by remember { mutableStateOf("") }
+    // Track whether the user has typed in the search box (to avoid clearing initial selection on first render)
+    var siteSearchHasBeenUsed by remember { mutableStateOf(false) }
+
+    // When the site search query is cleared (after user has typed), reset the selected site.
+    // This allows the user to reopen the dropdown and choose a new site.
+    LaunchedEffect(siteSearchQuery) {
+        if (siteSearchHasBeenUsed && siteSearchQuery.isBlank() && selectedSiteId.isNotBlank()) {
+            // Only reset if user previously typed something and then cleared it
+            Log.d(TAG, "Site search cleared – resetting selectedSiteId")
+            selectedSiteId = ""
+        }
+    }
 
     // Filtered sites based on search query
     val filteredSites = sites.filter { site ->
@@ -244,7 +256,11 @@ fun ActivitySelectionScreen(
             // Site search TextField
             OutlinedTextField(
                 value = siteSearchQuery,
-                onValueChange = { siteSearchQuery = it },
+                onValueChange = {
+                    siteSearchQuery = it
+                    // Mark that the user has interacted with the search box
+                    siteSearchHasBeenUsed = true
+                },
                 label = { Text("Search Site") },
                 placeholder = { Text("Type to filter by Site ID or name") },
                 singleLine = true,
