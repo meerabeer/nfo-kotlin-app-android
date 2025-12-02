@@ -141,21 +141,54 @@ class TrackingForegroundService : Service() {
     }
 
     /**
+     * Checks if we have location permission (required before starting FGS with type=location).
+     */
+    private fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val coarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        return fine || coarse
+    }
+
+    /**
      * Starts foreground with the correct service type for Android Q+ (API 29+).
      * Must be called within a few seconds of service start.
+     *
+     * This wrapper checks for location permission first and catches SecurityException
+     * to prevent crashes on Android 14/15 with targetSdk 34+.
      */
     private fun startForegroundWithType() {
+        // DEFENSIVE: Check permission before calling startForeground with type=location
+        if (!hasLocationPermission()) {
+            Log.e(TAG, "Missing location permission, cannot start foreground service with type=location")
+            stopSelf()
+            return
+        }
+
         val notification = createNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-            Log.d(TAG, "startForeground called with FOREGROUND_SERVICE_TYPE_LOCATION")
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-            Log.d(TAG, "startForeground called (pre-Q)")
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+                Log.d(TAG, "startForeground called with FOREGROUND_SERVICE_TYPE_LOCATION")
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+                Log.d(TAG, "startForeground called (pre-Q)")
+            }
+        } catch (se: SecurityException) {
+            Log.e(TAG, "SecurityException when starting location foreground service", se)
+            stopSelf()
         }
     }
 

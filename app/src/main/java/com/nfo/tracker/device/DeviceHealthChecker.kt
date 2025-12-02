@@ -58,7 +58,11 @@ object DeviceHealthChecker {
 
     // ----------- CHECKS -----------
 
-    private fun hasLocationPermission(context: Context): Boolean {
+    /**
+     * Returns true if either ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION is granted.
+     * This is PUBLIC so it can be used to guard foreground service starts.
+     */
+    fun hasLocationPermission(context: Context): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION

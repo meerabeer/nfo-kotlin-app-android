@@ -2,14 +2,12 @@ package com.nfo.tracker
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -41,6 +38,7 @@ import com.nfo.tracker.device.DeviceHealthChecker
 import com.nfo.tracker.device.DeviceHealthStatus
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.DeviceHealthScreen
+import com.nfo.tracker.ui.PermissionGateScreen
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
 import com.nfo.tracker.work.HealthWatchdogScheduler
@@ -57,37 +55,8 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "MainActivity"
     }
 
-    // Launcher for POST_NOTIFICATIONS permission (Android 13+)
-    private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Register notification permission launcher BEFORE setContent
-        notificationPermissionLauncher = registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted) {
-                Log.d(TAG, "POST_NOTIFICATIONS permission GRANTED")
-            } else {
-                Log.w(TAG, "POST_NOTIFICATIONS permission DENIED - notifications will be silent")
-            }
-        }
-
-        // Request notification permission on Android 13+ (API 33+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val hasPermission = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!hasPermission) {
-                Log.d(TAG, "Requesting POST_NOTIFICATIONS permission...")
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                Log.d(TAG, "POST_NOTIFICATIONS permission already granted")
-            }
-        }
 
         enableEdgeToEdge()
         setContent {
@@ -96,10 +65,33 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    TrackingScreen()
+                    MainAppFlow()
                 }
             }
         }
+    }
+}
+
+/**
+ * Main app flow that gates the user behind permission screen first.
+ * Once location permission is granted, shows the main tracking screen.
+ */
+@Composable
+fun MainAppFlow() {
+    // State to track if user has passed the permission gate
+    var hasPassedPermissionGate by remember { mutableStateOf(false) }
+
+    if (!hasPassedPermissionGate) {
+        // Show permission gate screen first
+        PermissionGateScreen(
+            onAllPermissionsGranted = {
+                Log.d("MainActivity", "Permission gate passed, showing main app")
+                hasPassedPermissionGate = true
+            }
+        )
+    } else {
+        // Show main tracking screen
+        TrackingScreen()
     }
 }
 
@@ -143,10 +135,44 @@ fun TrackingScreen() {
     var showDeviceHealthScreen by remember { mutableStateOf(false) }
     var deviceHealthStatus by remember { mutableStateOf<DeviceHealthStatus?>(null) }
 
+    // Location permission launcher - requests permission before starting foreground service
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val fineGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+        Log.d("MainActivity", "Location permission result: fine=$fineGranted, coarse=$coarseGranted")
+
+        if (fineGranted || coarseGranted) {
+            // Permission granted - now we can safely start tracking
+            Log.d("MainActivity", "Location permission granted, starting shift...")
+            onShift = true
+            actuallyStartShiftAndTracking(context)
+        } else {
+            Log.w("MainActivity", "Location permission denied, cannot start tracking")
+            // Reset state - user denied permission
+            showDeviceHealthScreen = false
+        }
+    }
+
     /**
-     * Actually starts the shift and tracking. Called when all health checks pass.
+     * Actually starts the shift and tracking. Called when all health checks pass
+     * AND location permission is confirmed granted.
      */
     fun startShift() {
+        // Double-check permission before starting (defensive)
+        if (!DeviceHealthChecker.hasLocationPermission(context)) {
+            Log.d("MainActivity", "startShift: Permission not granted, requesting...")
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+
         onShift = true
         actuallyStartShiftAndTracking(context)
     }
