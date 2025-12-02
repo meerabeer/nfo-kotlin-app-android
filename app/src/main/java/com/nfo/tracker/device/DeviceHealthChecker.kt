@@ -79,38 +79,82 @@ object DeviceHealthChecker {
         return fineGranted || coarseGranted
     }
 
+    /**
+     * Background location heuristic - GENEROUS because we use a foreground service.
+     *
+     * Since our app uses a foreground service with FOREGROUND_SERVICE_TYPE_LOCATION,
+     * we don't strictly need ACCESS_BACKGROUND_LOCATION permission. The foreground
+     * service keeps us "in the foreground" from Android's perspective.
+     *
+     * This check is for RECOMMENDED status only - it should NOT block shift start.
+     */
     private fun hasBackgroundLocationPermission(context: Context): Boolean {
-        // Background location is "recommended", not required
+        // If we don't have foreground location permission, background doesn't matter
+        if (!hasLocationPermission(context)) {
+            Log.d(TAG, "Background location: no foreground permission → false")
+            return false
+        }
+
+        // On Android 9 and below, there's no separate background permission
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Log.d(TAG, "Background location: SDK<29 → treated as OK")
             return true
         }
 
-        // If the app does not even request ACCESS_BACKGROUND_LOCATION, treat as OK
-        val hasBgInManifest = try {
-            val pm = context.packageManager
-            val pkgInfo = pm.getPackageInfo(
-                context.packageName,
-                PackageManager.GET_PERMISSIONS
-            )
-            pkgInfo.requestedPermissions?.contains(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == true
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to inspect manifest for background location", e)
-            false
-        }
-
-        if (!hasBgInManifest) {
-            Log.d(TAG, "Background location: not requested in manifest → treated as OK")
-            return true
-        }
-
+        // Check if ACCESS_BACKGROUND_LOCATION is explicitly granted
         val bgGranted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_BACKGROUND_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-        Log.d(TAG, "Background location permission: granted=$bgGranted")
-        return bgGranted
+        // GENEROUS HEURISTIC: Since we use a foreground service, we treat this as OK
+        // even if bgGranted is false. The foreground service keeps us active.
+        // We only show a recommendation, not a blocker.
+        if (!bgGranted) {
+            Log.d(TAG, "Background location: not explicitly granted, but FGS covers us → treating as OK")
+        } else {
+            Log.d(TAG, "Background location: explicitly granted → OK")
+        }
+
+        // Always return true if we have foreground location - FGS handles the rest
+        return true
+    }
+
+    /**
+     * Battery optimization heuristic - GENEROUS to handle Samsung/OEM quirks.
+     *
+     * On some devices (especially Samsung), setting "Unrestricted" in the UI
+     * doesn't always flip isIgnoringBatteryOptimizations() to true.
+     *
+     * This check is for RECOMMENDED status only - it should NOT block shift start.
+     */
+    private fun isBatteryOptimizationOk(context: Context): Boolean {
+        // Before Android M (API 23), there's no Doze/battery optimization
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            Log.d(TAG, "Battery optimization: SDK<23 → treated as OK")
+            return true
+        }
+
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm == null) {
+            // If we can't access PowerManager, don't show a warning
+            Log.w(TAG, "Battery optimization: PowerManager unavailable → treating as OK")
+            return true
+        }
+
+        val ignoring = pm.isIgnoringBatteryOptimizations(context.packageName)
+        Log.d(TAG, "Battery optimization: isIgnoringBatteryOptimizations=$ignoring")
+
+        // GENEROUS HEURISTIC: Even if ignoring==false, we don't strictly require it
+        // because the foreground service + WorkManager should keep us alive.
+        // On Samsung, this often returns false even when "Unrestricted" is set.
+        // We still show the recommendation, but always return true to avoid false negatives.
+        if (!ignoring) {
+            Log.d(TAG, "Battery optimization: system says optimized, but FGS should keep us alive → treating as OK")
+        }
+
+        // Always return true - this is just a recommendation
+        return true
     }
 
     private fun isLocationEnabled(context: Context): Boolean {
@@ -119,13 +163,6 @@ object DeviceHealthChecker {
                 lm?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
         Log.d(TAG, "Location enabled: $enabled")
         return enabled
-    }
-
-    private fun isBatteryOptimizationOk(context: Context): Boolean {
-        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        val ignoring = pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
-        Log.d(TAG, "Battery optimization: ignoring=$ignoring")
-        return ignoring
     }
 
     private fun isNetworkAvailable(context: Context): Boolean {
