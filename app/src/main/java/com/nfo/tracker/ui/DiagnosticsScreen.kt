@@ -147,7 +147,7 @@ fun DiagnosticsScreen(
                             )
                             DiagnosticsRow(
                                 label = "On Shift",
-                                value = if (heartbeat.onShift) "Yes" else "No"
+                                value = if (heartbeat.onShift == true) "Yes" else "No"
                             )
                             DiagnosticsRow(
                                 label = "Status",
@@ -269,7 +269,7 @@ private fun formatTimestamp(timestamp: Long): String {
     return try {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         sdf.format(Date(timestamp))
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         timestamp.toString()
     }
 }
