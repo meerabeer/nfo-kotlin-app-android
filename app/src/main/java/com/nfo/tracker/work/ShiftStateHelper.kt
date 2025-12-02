@@ -26,17 +26,16 @@ object ShiftStateHelper {
     private const val PREFS_NAME = "nfo_tracker_prefs"
     private const val KEY_USERNAME = "username"
     private const val KEY_DISPLAY_NAME = "display_name"
-
-    /** Default username if none is set (matches TrackingForegroundService). */
-    private const val DEFAULT_USERNAME = "NFO_TEST"
+    private const val KEY_IS_LOGGED_IN = "is_logged_in"
+    private const val KEY_HOME_LOCATION = "home_location"
 
     /**
      * Returns the current username from SharedPreferences.
-     * Falls back to [DEFAULT_USERNAME] if not set.
+     * Returns null if no user is logged in.
      */
-    fun getUsername(context: Context): String {
+    fun getUsername(context: Context): String? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_USERNAME, DEFAULT_USERNAME) ?: DEFAULT_USERNAME
+        return prefs.getString(KEY_USERNAME, null)
     }
 
     /**
@@ -46,6 +45,62 @@ object ShiftStateHelper {
     fun getDisplayName(context: Context): String? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getString(KEY_DISPLAY_NAME, null)
+    }
+
+    /**
+     * Returns true if the user is logged in.
+     */
+    fun isLoggedIn(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+    }
+
+    /**
+     * Returns the home location of the logged-in user.
+     * May be null if not set.
+     */
+    fun getHomeLocation(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_HOME_LOCATION, null)
+    }
+
+    /**
+     * Saves the logged-in user's information to SharedPreferences.
+     *
+     * @param context Application or Activity context.
+     * @param username The user's unique identifier (from NFOUsers.Username).
+     * @param displayName The user's display name (from NFOUsers.name), may be null.
+     * @param homeLocation The user's home location (from NFOUsers.home_location), may be null.
+     */
+    fun setLoggedInUser(
+        context: Context,
+        username: String,
+        displayName: String?,
+        homeLocation: String?
+    ) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(KEY_USERNAME, username)
+            .putString(KEY_DISPLAY_NAME, displayName)
+            .putString(KEY_HOME_LOCATION, homeLocation)
+            .putBoolean(KEY_IS_LOGGED_IN, true)
+            .apply()
+        Log.d(TAG, "User logged in: username=$username, displayName=$displayName, homeLocation=$homeLocation")
+    }
+
+    /**
+     * Clears the user's login state from SharedPreferences.
+     * Sets is_logged_in = false and removes username, display name, and home location.
+     */
+    fun clearUser(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove(KEY_USERNAME)
+            .remove(KEY_DISPLAY_NAME)
+            .remove(KEY_HOME_LOCATION)
+            .putBoolean(KEY_IS_LOGGED_IN, false)
+            .apply()
+        Log.d(TAG, "User cleared from SharedPreferences")
     }
 
     /**

@@ -56,6 +56,7 @@ import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.DeviceHealthScreen
 import com.nfo.tracker.ui.DeviceSetupWizardScreen
 import com.nfo.tracker.ui.DiagnosticsScreen
+import com.nfo.tracker.ui.LoginScreen
 import com.nfo.tracker.ui.PermissionGateScreen
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
@@ -91,53 +92,75 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * Main app flow that gates the user behind permission screen first.
- * Once location permission is granted, shows the main tracking screen.
- * Uses NavHost for navigation to Device Setup Wizard and Diagnostics screens.
+ * Main app flow that shows login if needed, then gates the user behind permission screen.
+ * Once logged in and location permission is granted, shows the main tracking screen.
+ * Uses NavHost for navigation to Login, Device Setup Wizard and Diagnostics screens.
  */
 @Composable
 fun MainAppFlow() {
-    // State to track if user has passed the permission gate
-    var hasPassedPermissionGate by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
-    if (!hasPassedPermissionGate) {
-        // Show permission gate screen first
-        PermissionGateScreen(
-            onAllPermissionsGranted = {
-                Log.d("MainActivity", "Permission gate passed, showing main app")
-                hasPassedPermissionGate = true
-            }
-        )
+    // Determine the start destination based on login state
+    val isLoggedIn = remember { ShiftStateHelper.isLoggedIn(context) }
+    val hasUsername = remember { !ShiftStateHelper.getUsername(context).isNullOrBlank() }
+
+    val startDestination = if (isLoggedIn && hasUsername) {
+        "permission_gate"
     } else {
-        // Show main app with navigation
-        val navController = rememberNavController()
+        "login"
+    }
 
-        NavHost(
-            navController = navController,
-            startDestination = "tracking"
-        ) {
-            composable("tracking") {
-                TrackingScreen(
-                    onNavigateToDeviceSetup = {
-                        navController.navigate("device_setup_wizard")
-                    },
-                    onNavigateToDiagnostics = {
-                        navController.navigate("diagnostics")
+    Log.d("MainActivity", "MainAppFlow: isLoggedIn=$isLoggedIn, hasUsername=$hasUsername, startDestination=$startDestination")
+
+    val navController = rememberNavController()
+
+    NavHost(
+        navController = navController,
+        startDestination = startDestination
+    ) {
+        composable("login") {
+            LoginScreen(
+                onLoginSuccess = {
+                    Log.d("MainActivity", "Login successful, navigating to permission_gate")
+                    navController.navigate("permission_gate") {
+                        popUpTo("login") { inclusive = true }
                     }
-                )
-            }
+                }
+            )
+        }
 
-            composable("device_setup_wizard") {
-                DeviceSetupWizardScreen(
-                    onBack = { navController.popBackStack() }
-                )
-            }
+        composable("permission_gate") {
+            PermissionGateScreen(
+                onAllPermissionsGranted = {
+                    Log.d("MainActivity", "Permission gate passed, navigating to tracking")
+                    navController.navigate("tracking") {
+                        popUpTo("permission_gate") { inclusive = true }
+                    }
+                }
+            )
+        }
 
-            composable("diagnostics") {
-                DiagnosticsScreen(
-                    onBack = { navController.popBackStack() }
-                )
-            }
+        composable("tracking") {
+            TrackingScreen(
+                onNavigateToDeviceSetup = {
+                    navController.navigate("device_setup_wizard")
+                },
+                onNavigateToDiagnostics = {
+                    navController.navigate("diagnostics")
+                }
+            )
+        }
+
+        composable("device_setup_wizard") {
+            DeviceSetupWizardScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("diagnostics") {
+            DiagnosticsScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }

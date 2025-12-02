@@ -23,6 +23,7 @@ object SupabaseClient {
     private const val BASE_URL = "https://rzivbeaqfhamlpsfaqov.supabase.co"
     private const val API_KEY = "sb_publishable_Kifo4X6qxs6nkv7yilHRkA_7RapeV4a"
     private const val TABLE_ENDPOINT = "$BASE_URL/rest/v1/nfo_status?on_conflict=username"
+    private const val NFOUSERS_ENDPOINT = "$BASE_URL/rest/v1/NFOUsers"
 
     private val client = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
@@ -32,6 +33,89 @@ object SupabaseClient {
 
     // Use Asia/Riyadh (UTC+3) so Supabase shows same clock time as mobile device
     private val riyadhZone: ZoneId = ZoneId.of("Asia/Riyadh")
+
+    /**
+     * Data class representing a user from the NFOUsers table.
+     */
+    data class NfoUserDto(
+        val username: String,
+        val name: String?,
+        val homeLocation: String?
+    )
+
+    /**
+     * Authenticates a user against the NFOUsers table in Supabase.
+     *
+     * @param username The username to authenticate.
+     * @param password The password to authenticate.
+     * @return NfoUserDto if credentials are valid, null otherwise.
+     */
+    suspend fun loginNfoUser(username: String, password: String): NfoUserDto? {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Build URL with query parameters
+                val url = okhttp3.HttpUrl.Builder()
+                    .scheme("https")
+                    .host("rzivbeaqfhamlpsfaqov.supabase.co")
+                    .addPathSegments("rest/v1/NFOUsers")
+                    .addQueryParameter("Username", "eq.$username")
+                    .addQueryParameter("Password", "eq.$password")
+                    .addQueryParameter("select", "Username,name,home_location")
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .addHeader("apikey", API_KEY)
+                    .addHeader("Authorization", "Bearer $API_KEY")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                Log.d(TAG, "Attempting login for username=$username")
+
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val responseBody = try {
+                        response.body?.string()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error reading login response body", e)
+                        null
+                    }
+
+                    if (code == 200 && responseBody != null) {
+                        val jsonArray = JSONArray(responseBody)
+                        Log.d(TAG, "Login response: ${jsonArray.length()} rows returned")
+
+                        if (jsonArray.length() == 1) {
+                            val row = jsonArray.getJSONObject(0)
+                            val user = NfoUserDto(
+                                username = row.optString("Username", ""),
+                                name = row.optString("name", null).takeIf { it.isNotEmpty() },
+                                homeLocation = row.optString("home_location", null).takeIf { it.isNotEmpty() }
+                            )
+                            Log.d(TAG, "Login SUCCESS for username=$username, name=${user.name}")
+                            return@withContext user
+                        } else if (jsonArray.length() == 0) {
+                            Log.w(TAG, "Login FAILED: Invalid credentials for username=$username")
+                            return@withContext null
+                        } else {
+                            Log.w(TAG, "Login FAILED: Multiple users found for username=$username (unexpected)")
+                            return@withContext null
+                        }
+                    } else {
+                        Log.e(TAG, "Login FAILED: HTTP $code, body=$responseBody")
+                        return@withContext null
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Login error: ${e.message}", e)
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "Login unexpected error: ${e.message}", e)
+                null
+            }
+        }
+    }
 
     /**
      * Converts epoch millis (or seconds) to ISO-8601 string in Asia/Riyadh timezone.

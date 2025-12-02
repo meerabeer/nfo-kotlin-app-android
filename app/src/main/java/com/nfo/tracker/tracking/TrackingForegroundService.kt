@@ -27,6 +27,7 @@ import com.nfo.tracker.R
 import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.data.local.HeartbeatEntity
 import com.nfo.tracker.data.remote.SupabaseClient
+import com.nfo.tracker.work.ShiftStateHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -253,10 +254,21 @@ class TrackingForegroundService : Service() {
 
                 val now = System.currentTimeMillis()
 
+                // Get logged-in user info from ShiftStateHelper
+                val username = ShiftStateHelper.getUsername(applicationContext)
+                val displayName = ShiftStateHelper.getDisplayName(applicationContext)
+                val homeLocation = ShiftStateHelper.getHomeLocation(applicationContext)
+
+                if (username.isNullOrBlank()) {
+                    Log.w(TAG, "No logged-in user found! Username is null/blank. Heartbeat will use 'UNKNOWN'.")
+                }
+
+                val effectiveUsername = username ?: "UNKNOWN"
+
                 // Build a heartbeat row with all timestamp fields set
                 val heartbeat = HeartbeatEntity(
-                    username = "NFO_TEST", // TODO: replace with real logged-in username
-                    name = null,
+                    username = effectiveUsername,
+                    name = displayName,
                     onShift = true,
                     status = "on-shift",
                     activity = "tracking",
@@ -269,14 +281,14 @@ class TrackingForegroundService : Service() {
                     lastPing = now,
                     lastActiveSource = "mobile-app-gps",
                     lastActiveAt = now,
-                    homeLocation = null,
+                    homeLocation = homeLocation,
                     createdAtLocal = now,
                     synced = false
                 )
 
                 Log.d(
                     TAG,
-                    "Location heartbeat: lat=${location.latitude}, lng=${location.longitude}"
+                    "Location heartbeat: username=$effectiveUsername, lat=${location.latitude}, lng=${location.longitude}"
                 )
 
                 // Upsert into DB and immediately sync to Supabase (Uber-style)
