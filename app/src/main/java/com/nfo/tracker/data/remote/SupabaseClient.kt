@@ -72,10 +72,11 @@ object SupabaseClient {
             val pageSize = 1000
             var offset = 0
             val maxRows = 5000  // Safety cap to avoid infinite loops
+            var keepFetching = true
 
             Log.d(TAG, "fetchSites() starting paginated fetch (pageSize=$pageSize, maxRows=$maxRows)")
 
-            while (offset < maxRows) {
+            while (keepFetching && offset < maxRows) {
                 try {
                     val url = okhttp3.HttpUrl.Builder()
                         .scheme("https")
@@ -96,48 +97,48 @@ object SupabaseClient {
 
                     Log.d(TAG, "fetchSites() page request: offset=$offset, limit=$pageSize, URL=$url")
 
-                    client.newCall(request).execute().use { response ->
-                        val code = response.code
-                        val responseBody = response.body?.string()
+                    val response = client.newCall(request).execute()
+                    val code = response.code
+                    val responseBody = response.body?.string()
+                    response.close()
 
-                        if (code == 200 && responseBody != null) {
-                            val jsonArray = JSONArray(responseBody)
-                            val pageSites = mutableListOf<SiteDto>()
+                    if (code == 200 && responseBody != null) {
+                        val jsonArray = JSONArray(responseBody)
+                        val pageSites = mutableListOf<SiteDto>()
 
-                            for (i in 0 until jsonArray.length()) {
-                                val row = jsonArray.getJSONObject(i)
-                                val siteId = row.optString("site_id", "")
-                                if (siteId.isNotEmpty()) {
-                                    pageSites.add(
-                                        SiteDto(
-                                            siteId = siteId,
-                                            siteName = row.optString("site_name", null).takeIf { it.isNotEmpty() }
-                                        )
+                        for (i in 0 until jsonArray.length()) {
+                            val row = jsonArray.getJSONObject(i)
+                            val siteId = row.optString("site_id", "")
+                            if (siteId.isNotEmpty()) {
+                                pageSites.add(
+                                    SiteDto(
+                                        siteId = siteId,
+                                        siteName = row.optString("site_name", null).takeIf { it.isNotEmpty() }
                                     )
-                                }
+                                )
                             }
-
-                            Log.d(TAG, "fetchSites() page offset=$offset returned ${pageSites.size} rows")
-                            allSites.addAll(pageSites)
-
-                            // If we got fewer rows than pageSize, we've reached the end
-                            if (pageSites.size < pageSize) {
-                                Log.d(TAG, "fetchSites() reached end of data (got ${pageSites.size} < $pageSize)")
-                                break
-                            }
-
-                            offset += pageSize
-                        } else {
-                            Log.e(TAG, "fetchSites() page request failed: HTTP $code, body=$responseBody")
-                            break  // Stop pagination on error, return what we have
                         }
+
+                        Log.d(TAG, "fetchSites() page offset=$offset returned ${pageSites.size} rows")
+                        allSites.addAll(pageSites)
+
+                        // If we got fewer rows than pageSize, we've reached the end
+                        if (pageSites.size < pageSize) {
+                            Log.d(TAG, "fetchSites() reached end of data (got ${pageSites.size} < $pageSize)")
+                            keepFetching = false
+                        } else {
+                            offset += pageSize
+                        }
+                    } else {
+                        Log.e(TAG, "fetchSites() page request failed: HTTP $code, body=$responseBody")
+                        keepFetching = false  // Stop pagination on error, return what we have
                     }
                 } catch (e: IOException) {
                     Log.e(TAG, "fetchSites() page request error: ${e.message}", e)
-                    break  // Stop pagination on error, return what we have
+                    keepFetching = false  // Stop pagination on error, return what we have
                 } catch (e: Exception) {
                     Log.e(TAG, "fetchSites() unexpected error: ${e.message}", e)
-                    break  // Stop pagination on error, return what we have
+                    keepFetching = false  // Stop pagination on error, return what we have
                 }
             }
 
