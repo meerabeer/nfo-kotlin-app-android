@@ -57,7 +57,7 @@ object SupabaseClient {
                 val url = okhttp3.HttpUrl.Builder()
                     .scheme("https")
                     .host("rzivbeaqfhamlpsfaqov.supabase.co")
-                    .addPathSegments("rest/v1/NFOUsers")
+                    .addPathSegments("rest/v1/NFOusers")
                     .addQueryParameter("Username", "eq.$username")
                     .addQueryParameter("Password", "eq.$password")
                     .addQueryParameter("select", "Username,name,home_location")
