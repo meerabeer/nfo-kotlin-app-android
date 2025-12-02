@@ -14,9 +14,12 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -24,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +42,8 @@ import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.ui.theme.NfoKotlinAppTheme
 import com.nfo.tracker.work.HeartbeatWorker
 import com.nfo.tracker.work.HealthWatchdogScheduler
+import com.nfo.tracker.work.ShiftStateHelper
+import kotlinx.coroutines.launch
 
 /** SharedPreferences file for tracking state (shared with HealthWatchdogWorker). */
 private const val PREFS_NAME = "nfo_tracker_prefs"
@@ -113,7 +119,9 @@ private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
 @Composable
 fun TrackingScreen() {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var onShift by remember { mutableStateOf(false) }
+    var isGoingOffShift by remember { mutableStateOf(false) }  // Loading state for off-shift
 
     // Launcher for requesting location permissions
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -192,15 +200,54 @@ fun TrackingScreen() {
                         )
                     }
                 } else {
-                    // Going OFF shift
-                    onShift = false
-                    saveOnShiftState(context, false)
-                    TrackingForegroundService.stop(context)
-                    HealthWatchdogScheduler.cancel(context)
+                    // Going OFF shift - send final heartbeat before stopping
+                    isGoingOffShift = true
+                    coroutineScope.launch {
+                        val username = ShiftStateHelper.getUsername(context)
+                        val displayName = ShiftStateHelper.getDisplayName(context)
+
+                        Log.d("MainActivity", "Going off shift, sending final heartbeat for $username")
+
+                        // Send the off-shift heartbeat (waits for sync attempt)
+                        val syncSuccess = ShiftStateHelper.sendOffShiftHeartbeat(
+                            context = context,
+                            username = username,
+                            name = displayName
+                        )
+
+                        Log.d(
+                            "MainActivity",
+                            "Off-shift heartbeat sent, sync=${if (syncSuccess) "SUCCESS" else "PENDING"}. " +
+                                "Stopping tracking service..."
+                        )
+
+                        // After heartbeat is written (and sync attempted), stop everything
+                        onShift = false
+                        saveOnShiftState(context, false)
+                        TrackingForegroundService.stop(context)
+                        HealthWatchdogScheduler.cancel(context)
+                        // Note: HeartbeatWorker keeps running as backup to retry failed syncs
+
+                        isGoingOffShift = false
+                    }
                 }
-            }
+            },
+            enabled = !isGoingOffShift  // Disable button while going off shift
         ) {
-            Text(text = if (onShift) "Go Off Shift" else "Go On Shift")
+            if (isGoingOffShift) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        text = "Ending Shift...",
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            } else {
+                Text(text = if (onShift) "Go Off Shift" else "Go On Shift")
+            }
         }
     }
 }
