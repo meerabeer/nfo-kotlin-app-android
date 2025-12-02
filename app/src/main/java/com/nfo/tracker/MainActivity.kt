@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
@@ -143,32 +142,6 @@ fun TrackingScreen() {
     // Device health gate state
     var showDeviceHealthScreen by remember { mutableStateOf(false) }
     var deviceHealthStatus by remember { mutableStateOf<DeviceHealthStatus?>(null) }
-
-    // Launcher for requesting location permissions
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val fineGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        val coarseGranted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-
-        if (fineGranted || coarseGranted) {
-            // Permission granted - now check full device health before starting
-            val status = DeviceHealthChecker.getHealthStatus(context)
-            deviceHealthStatus = status
-
-            if (status.isHealthy) {
-                // All checks pass - start tracking
-                actuallyStartShiftAndTracking(context)
-            } else {
-                // Show health screen to fix remaining issues
-                showDeviceHealthScreen = true
-            }
-        } else {
-            // Permission denied – reset state
-            saveOnShiftState(context, false)
-            onShift = false
-        }
-    }
 
     /**
      * Actually starts the shift and tracking. Called when all health checks pass.
