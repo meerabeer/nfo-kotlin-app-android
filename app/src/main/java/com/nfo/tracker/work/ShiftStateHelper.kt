@@ -29,6 +29,12 @@ object ShiftStateHelper {
     private const val KEY_IS_LOGGED_IN = "is_logged_in"
     private const val KEY_HOME_LOCATION = "home_location"
 
+    // Activity context keys
+    private const val KEY_CURRENT_ACTIVITY = "current_activity"
+    private const val KEY_CURRENT_SITE_ID = "current_site_id"
+    private const val KEY_VIA_WAREHOUSE = "via_warehouse"
+    private const val KEY_WAREHOUSE_NAME = "warehouse_name_current"
+
     /**
      * Returns the current username from SharedPreferences.
      * Returns null if no user is logged in.
@@ -101,6 +107,86 @@ object ShiftStateHelper {
             .putBoolean(KEY_IS_LOGGED_IN, false)
             .apply()
         Log.d(TAG, "User cleared from SharedPreferences")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Activity Context Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Saves the current activity context to SharedPreferences.
+     *
+     * @param context Application or Activity context.
+     * @param activity The current activity type (e.g., "Normal Tracking", "PMR Visit").
+     * @param siteId The current site ID.
+     * @param viaWarehouse Whether the NFO is going via a warehouse.
+     * @param warehouseName The warehouse name if viaWarehouse is true.
+     */
+    fun setCurrentActivityContext(
+        context: Context,
+        activity: String?,
+        siteId: String?,
+        viaWarehouse: Boolean,
+        warehouseName: String?
+    ) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(KEY_CURRENT_ACTIVITY, activity)
+            .putString(KEY_CURRENT_SITE_ID, siteId)
+            .putBoolean(KEY_VIA_WAREHOUSE, viaWarehouse)
+            .putString(KEY_WAREHOUSE_NAME, warehouseName)
+            .apply()
+        Log.d(TAG, "Activity context saved: activity=$activity, siteId=$siteId, viaWarehouse=$viaWarehouse, warehouseName=$warehouseName")
+    }
+
+    /**
+     * Returns the current activity type from SharedPreferences.
+     * May be null if not set.
+     */
+    fun getCurrentActivity(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_CURRENT_ACTIVITY, null)
+    }
+
+    /**
+     * Returns the current site ID from SharedPreferences.
+     * May be null if not set.
+     */
+    fun getCurrentSiteId(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_CURRENT_SITE_ID, null)
+    }
+
+    /**
+     * Returns whether the NFO is currently going via a warehouse.
+     */
+    fun isViaWarehouse(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_VIA_WAREHOUSE, false)
+    }
+
+    /**
+     * Returns the current warehouse name from SharedPreferences.
+     * May be null if not set or if viaWarehouse is false.
+     */
+    fun getWarehouseName(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_WAREHOUSE_NAME, null)
+    }
+
+    /**
+     * Clears the current activity context but keeps the logged-in user.
+     * Resets activity, siteId, viaWarehouse, and warehouseName to defaults.
+     */
+    fun clearCurrentActivityContext(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove(KEY_CURRENT_ACTIVITY)
+            .remove(KEY_CURRENT_SITE_ID)
+            .remove(KEY_VIA_WAREHOUSE)
+            .remove(KEY_WAREHOUSE_NAME)
+            .apply()
+        Log.d(TAG, "Activity context cleared")
     }
 
     /**
