@@ -73,6 +73,7 @@ object SupabaseClient {
                     .host("rzivbeaqfhamlpsfaqov.supabase.co")
                     .addPathSegments("rest/v1/Site_Coordinates")
                     .addQueryParameter("select", "site_id,site_name")
+                    .addQueryParameter("limit", "5000")
                     .build()
 
                 val request = Request.Builder()

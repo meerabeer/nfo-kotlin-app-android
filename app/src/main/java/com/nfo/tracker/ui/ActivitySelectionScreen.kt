@@ -52,11 +52,13 @@ private const val TAG = "ActivitySelectionScreen"
 
 /** Fixed list of activity types */
 private val ACTIVITY_OPTIONS = listOf(
-    "tracking",
-    "PMR Visit",
-    "Fault Visit",
-    "Warehouse Pickup",
-    "Other"
+    "Outage",
+    "Alarm",
+    "Performance",
+    "HO5",
+    "PMR",
+    "Audit",
+    "Survey"
 )
 
 /**
@@ -97,6 +99,16 @@ fun ActivitySelectionScreen(
     var activityDropdownExpanded by remember { mutableStateOf(false) }
     var siteDropdownExpanded by remember { mutableStateOf(false) }
     var warehouseDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Site search/filter state
+    var siteSearchQuery by remember { mutableStateOf("") }
+
+    // Filtered sites based on search query
+    val filteredSites = sites.filter { site ->
+        siteSearchQuery.isBlank() ||
+        site.siteId.contains(siteSearchQuery, ignoreCase = true) ||
+        (site.siteName?.contains(siteSearchQuery, ignoreCase = true) == true)
+    }
 
     // Validation error
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -222,21 +234,37 @@ fun ActivitySelectionScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Site selector
+            // Site selector with search
             Text(
                 text = "Site",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
+
+            // Site search TextField
+            OutlinedTextField(
+                value = siteSearchQuery,
+                onValueChange = { siteSearchQuery = it },
+                label = { Text("Search Site") },
+                placeholder = { Text("Type to filter by Site ID or name") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                enabled = !isLoading && sites.isNotEmpty()
+            )
+
+            // Site dropdown (filtered)
             ExposedDropdownMenuBox(
                 expanded = siteDropdownExpanded,
                 onExpandedChange = { siteDropdownExpanded = it }
             ) {
                 val displaySite = if (selectedSiteId.isNotBlank()) {
+                    // Look in full sites list for display, not filtered
                     val site = sites.find { it.siteId == selectedSiteId }
                     if (site?.siteName != null) "${site.siteId} – ${site.siteName}" else selectedSiteId
                 } else {
-                    "Select site"
+                    "Select site (${filteredSites.size} shown)"
                 }
                 OutlinedTextField(
                     value = displaySite,
@@ -252,7 +280,8 @@ fun ActivitySelectionScreen(
                     expanded = siteDropdownExpanded,
                     onDismissRequest = { siteDropdownExpanded = false }
                 ) {
-                    sites.forEach { site ->
+                    // Use filteredSites instead of full sites list
+                    filteredSites.forEach { site ->
                         val displayText = if (site.siteName != null) {
                             "${site.siteId} – ${site.siteName}"
                         } else {
@@ -278,6 +307,12 @@ fun ActivitySelectionScreen(
             } else if (sites.isEmpty()) {
                 Text(
                     text = "No sites available",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else if (filteredSites.isEmpty() && siteSearchQuery.isNotBlank()) {
+                Text(
+                    text = "No sites match \"$siteSearchQuery\"",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
