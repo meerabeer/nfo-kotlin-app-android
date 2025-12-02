@@ -148,6 +148,7 @@ object DeviceHealthChecker {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
 
+            Log.d(TAG, "Location permission check: fine=$fineGranted, coarse=$coarseGranted")
             fineGranted || coarseGranted
         } catch (e: Exception) {
             Log.e(TAG, "Error checking location permission: ${e.message}", e)
@@ -159,27 +160,47 @@ object DeviceHealthChecker {
         return try {
             // Background location permission only exists on Android 10+ (API 29+)
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                // On older Android, background location is granted with foreground location
+                Log.d(TAG, "Background location: SDK < 29, auto-granted with foreground")
                 return true
             }
 
-            // Check if ACCESS_BACKGROUND_LOCATION is even requested in the manifest
-            // If not requested, don't fail on it
-            val pm = context.packageManager
-            val info = pm.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
-            val requestedPermissions = info.requestedPermissions?.toList().orEmpty()
-            val requestsBackgroundLocation = Manifest.permission.ACCESS_BACKGROUND_LOCATION in requestedPermissions
-
-            if (!requestsBackgroundLocation) {
-                Log.d(TAG, "ACCESS_BACKGROUND_LOCATION not in manifest, skipping check")
-                return true
-            }
-
-            // Check if the permission is granted
+            // First check if foreground location is granted - if not, background doesn't matter
+            val hasForeground = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasForeground) {
+                Log.d(TAG, "Background location: foreground not granted, returning false")
+                return false
+            }
+
+            // Check the actual background location permission
+            val bgGranted = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
+
+            Log.d(TAG, "Background location permission check: granted=$bgGranted")
+
+            // On Samsung/some OEMs, "Allow all the time" in UI doesn't always
+            // flip ACCESS_BACKGROUND_LOCATION to granted via checkSelfPermission().
+            // However, if a foreground service with type=location is used,
+            // the GPS tracking works anyway.
+            //
+            // Since we use a foreground service (which doesn't strictly need
+            // ACCESS_BACKGROUND_LOCATION), we'll be lenient here:
+            // If foreground location is granted, assume background is OK.
+            if (!bgGranted) {
+                Log.w(TAG, "Background location not explicitly granted, but foreground service should work. Treating as OK.")
+            }
+
+            // Return true if foreground is granted - our foreground service will handle it
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Error checking background location permission: ${e.message}", e)
             false
