@@ -33,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -396,8 +397,76 @@ fun TrackingScreen(
                 Text(
                     text = statusText,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)
+                    modifier = Modifier.padding(top = 16.dp, bottom = 16.dp)
                 )
+
+                // ═══════════════════════════════════════════════════════════════
+                // Read-only status panel showing current context from SharedPreferences
+                // ═══════════════════════════════════════════════════════════════
+                val currentActivity = ShiftStateHelper.getCurrentActivity(context)
+                val currentSiteId = ShiftStateHelper.getCurrentSiteId(context)
+                val viaWarehouse = ShiftStateHelper.isViaWarehouse(context)
+                val warehouseName = ShiftStateHelper.getWarehouseName(context)
+
+                androidx.compose.material3.Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        // Status line
+                        val statusLabel = when {
+                            !onShift -> "Off Shift"
+                            currentActivity.isNullOrBlank() -> "Free"
+                            else -> "Busy"
+                        }
+                        Text(
+                            text = "Status: $statusLabel",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (onShift) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            )
+
+                            if (currentActivity.isNullOrBlank()) {
+                                Text(
+                                    text = "No active activity",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    text = "Activity: $currentActivity",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Site: ${currentSiteId ?: "-"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (viaWarehouse) {
+                                    Text(
+                                        text = "Via warehouse: ${warehouseName ?: "-"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
                     onClick = {

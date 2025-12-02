@@ -264,6 +264,10 @@ object ShiftStateHelper {
             )
         }
 
+        // Clear local activity context so next shift starts clean
+        clearCurrentActivityContext(context)
+        Log.d(TAG, "Cleared activity context after off-shift heartbeat")
+
         success
     }
 
@@ -341,6 +345,10 @@ object ShiftStateHelper {
                     "Row saved locally (synced=false), HeartbeatWorker will retry."
             )
         }
+
+        // Clear local activity context before clearing user
+        clearCurrentActivityContext(context)
+        Log.d(TAG, "Cleared activity context after logout heartbeat")
 
         success
     }

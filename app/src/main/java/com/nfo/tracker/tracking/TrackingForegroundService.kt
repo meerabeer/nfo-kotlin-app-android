@@ -272,12 +272,14 @@ class TrackingForegroundService : Service() {
                 val effectiveUsername = username ?: "UNKNOWN"
 
                 // Build a heartbeat row with all timestamp fields set
+                // Note: activity may be null if user has closed activity ("Free" state).
+                // Do NOT default to "tracking" – null means no active activity.
                 val heartbeat = HeartbeatEntity(
                     username = effectiveUsername,
                     name = displayName,
                     onShift = true,
                     status = "on-shift",
-                    activity = currentActivity ?: "tracking",
+                    activity = currentActivity,
                     siteId = currentSiteId,
                     workOrderId = null,
                     viaWarehouse = if (currentViaWarehouse) true else null,
