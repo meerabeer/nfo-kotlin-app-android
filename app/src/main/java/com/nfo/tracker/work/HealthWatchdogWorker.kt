@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -147,11 +148,12 @@ class HealthWatchdogWorker(
                 HeartbeatSyncHelper.enqueueImmediateSync(applicationContext)
                 Log.d(TAG, "Watchdog: enqueued immediate sync for device-silent status")
 
-                // NOTE: We do NOT restart the TrackingForegroundService here.
-                // Android 13+ restricts starting FGS with type=location from WorkManager.
-                // User must reopen app to resume tracking.
+                // 4c. Attempt to restart TrackingForegroundService
+                // This may fail on Android 13+ if app is truly in background, but we try anyway
+                // If it fails, the notification will prompt user to reopen app
+                attemptServiceRestart()
 
-                // 4c. Show notification if cooldown has passed
+                // 4d. Show notification if cooldown has passed
                 val canShowNotification = (now - lastReactionAt) > STALE_NOTIFICATION_COOLDOWN_MILLIS
                 if (canShowNotification) {
                     showStaleNotification()
@@ -239,5 +241,32 @@ class HealthWatchdogWorker(
      */
     private fun rescheduleWatchdog() {
         HealthWatchdogScheduler.scheduleOneTime(applicationContext)
+    }
+
+    /**
+     * Attempts to restart the TrackingForegroundService.
+     * This may fail on Android 13+ if the app is truly in background,
+     * but will work if the app was recently used or has special privileges.
+     */
+    private fun attemptServiceRestart() {
+        val context = applicationContext
+        Log.d(TAG, "Watchdog: attempting to restart TrackingForegroundService...")
+
+        val serviceIntent = Intent(context, TrackingForegroundService::class.java).apply {
+            action = TrackingForegroundService.ACTION_START_FROM_WATCHDOG
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+            Log.d(TAG, "Watchdog: TrackingForegroundService restart requested")
+        } catch (e: Exception) {
+            // Expected to fail on Android 13+ when app is in background
+            // The notification will prompt user to reopen app
+            Log.w(TAG, "Watchdog: Failed to restart service (expected on Android 13+ in background): ${e.message}")
+        }
     }
 }

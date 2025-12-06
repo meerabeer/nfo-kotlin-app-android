@@ -125,24 +125,23 @@ class TrackingForegroundService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 // User-initiated start (e.g., tapped "Go On Shift" in MainActivity)
-                // This is the ONLY path that should start location tracking.
-                Log.d(TAG, "Starting tracking (user initiated)")
+                Log.d(TAG, "Starting tracking (user initiated via ACTION_START)")
+                startForegroundWithType()
+                startLocationUpdates()
+            }
+            ACTION_START_FROM_BOOT -> {
+                // Boot-initiated start (from BootReceiver after device reboot)
+                // This is allowed on Android 13+ if we have proper permissions and call startForeground() immediately
+                Log.d(TAG, "Starting tracking from boot (ACTION_START_FROM_BOOT)")
                 startForegroundWithType()
                 startLocationUpdates()
             }
             ACTION_START_FROM_WATCHDOG -> {
-                // NO-OP: Android 13+ restricts starting FGS with type=location from WorkManager.
-                // The watchdog now only marks device-silent and shows a notification.
-                Log.w(TAG, "ACTION_START_FROM_WATCHDOG received but ignored (Android 13+ restriction). User must reopen app.")
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            ACTION_START_FROM_BOOT -> {
-                // NO-OP: Android 13+ restricts starting FGS with type=location from BOOT_COMPLETED.
-                // BootReceiver now only schedules the watchdog.
-                Log.w(TAG, "ACTION_START_FROM_BOOT received but ignored (Android 13+ restriction). User must reopen app.")
-                stopSelf()
-                return START_NOT_STICKY
+                // Watchdog-initiated recovery start
+                // This may fail on Android 13+ if app is in background, but we try anyway
+                Log.d(TAG, "Starting tracking from watchdog (ACTION_START_FROM_WATCHDOG)")
+                startForegroundWithType()
+                startLocationUpdates()
             }
             ACTION_STOP -> {
                 Log.d(TAG, "Stopping tracking")

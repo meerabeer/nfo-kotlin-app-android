@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.work.HealthWatchdogScheduler
 import com.nfo.tracker.work.ShiftStateHelper
@@ -17,13 +18,13 @@ import com.nfo.tracker.work.ShiftStateHelper
 /**
  * BroadcastReceiver that handles device boot completion.
  *
- * If the NFO was "on shift" when the device rebooted, this receiver:
- * 1. Shows a normal notification prompting the user to reopen the app.
- * 2. Schedules the health watchdog to detect stale state and sync "device-silent" to Supabase.
+ * If the NFO was "on shift" and logged in when the device rebooted, this receiver:
+ * 1. Starts TrackingForegroundService to auto-resume location tracking and heartbeats.
+ * 2. Shows a notification informing the user tracking has resumed.
+ * 3. Schedules the health watchdog to monitor heartbeat freshness.
  *
- * NOTE: We intentionally do NOT start the TrackingForegroundService from here.
- * Android 13+ restricts starting foreground services with type=location from
- * background contexts like BOOT_COMPLETED.
+ * This ensures heartbeats continue automatically after reboot without requiring
+ * the NFO to manually reopen the app.
  *
  * Requires RECEIVE_BOOT_COMPLETED permission in AndroidManifest.xml.
  */
@@ -59,15 +60,45 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         // User was on shift when device rebooted.
-        Log.w(TAG, "BootReceiver: Device rebooted while on shift → posting reboot notification and scheduling watchdog")
+        Log.w(TAG, "BootReceiver: Device rebooted while on shift → starting tracking service, posting notification, scheduling watchdog")
 
-        // 1. Show a normal notification prompting user to reopen app
+        // 1. Start TrackingForegroundService to auto-resume heartbeats
+        // This is allowed even on Android 13+ because:
+        // - We have FOREGROUND_SERVICE_LOCATION permission in manifest
+        // - User granted location permission before going on shift
+        // - Service calls startForeground() immediately
+        startTrackingService(context)
+
+        // 2. Show a notification informing user tracking has resumed
         showRebootNotification(context)
 
-        // 2. Schedule the watchdog to detect stale heartbeat and sync "device-silent" to Supabase
+        // 3. Schedule the watchdog to detect stale heartbeat and sync "device-silent" to Supabase
         HealthWatchdogScheduler.scheduleOneTime(context)
 
-        Log.d(TAG, "BootReceiver: Reboot notification posted (id=$REBOOT_NOTIFICATION_ID) and watchdog scheduled")
+        Log.d(TAG, "BootReceiver: Service started, notification posted (id=$REBOOT_NOTIFICATION_ID), watchdog scheduled")
+    }
+
+    /**
+     * Starts the TrackingForegroundService after device reboot.
+     * Uses ACTION_START_FROM_BOOT to indicate boot-initiated start.
+     */
+    private fun startTrackingService(context: Context) {
+        Log.d(TAG, "BootReceiver: Starting TrackingForegroundService after reboot (on_shift & logged_in)")
+
+        val serviceIntent = Intent(context, TrackingForegroundService::class.java).apply {
+            action = TrackingForegroundService.ACTION_START_FROM_BOOT
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+            Log.d(TAG, "BootReceiver: TrackingForegroundService start requested successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "BootReceiver: Failed to start TrackingForegroundService: ${e.message}", e)
+        }
     }
 
     /**
@@ -106,8 +137,8 @@ class BootReceiver : BroadcastReceiver() {
 
         val notification = NotificationCompat.Builder(context, TrackingForegroundService.CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("NFO Tracker – Resume shift")
-            .setContentText("Tap to reopen app and resume tracking.")
+            .setContentTitle("NFO Tracker – Tracking resumed")
+            .setContentText("Tracking auto-resumed after reboot. Tap to open app.")
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
