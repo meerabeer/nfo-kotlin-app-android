@@ -40,9 +40,28 @@ class HeartbeatWorker(
                 request
             )
         }
+
+        /**
+         * Cancel the periodic heartbeat worker.
+         * Called when the user goes off shift to stop unnecessary sync attempts.
+         */
+        fun cancel(context: Context) {
+            Log.d("HeartbeatWorker", "Cancelling periodic heartbeat sync worker")
+            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_NAME)
+        }
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // Early exit if user is not logged in or not on shift
+        // This prevents unnecessary sync attempts when the user is off shift
+        val isLoggedIn = ShiftStateHelper.isLoggedIn(applicationContext)
+        val isOnShift = ShiftStateHelper.isOnShift(applicationContext)
+        
+        if (!isLoggedIn || !isOnShift) {
+            Log.d("HeartbeatWorker", "Skipping sync: isLoggedIn=$isLoggedIn, isOnShift=$isOnShift")
+            return@withContext Result.success()
+        }
+        
         try {
             val db = HeartbeatDatabase.getInstance(applicationContext)
             val dao = db.heartbeatDao()

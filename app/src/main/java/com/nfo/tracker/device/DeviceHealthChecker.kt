@@ -21,11 +21,16 @@ data class DeviceHealthStatus(
     val backgroundLocationOk: Boolean,
     val locationEnabled: Boolean,
     val batteryOptimizationOk: Boolean,
-    val networkOk: Boolean
+    val networkOk: Boolean,
+    val isStrictOem: Boolean
 ) {
-    // CRITICAL: must be true to allow "Continue"
+    /**
+     * CRITICAL: must be true to allow "Go On Shift".
+     * On strict OEMs (Samsung, Xiaomi, etc.), battery optimization is also critical.
+     */
     val allCriticalOk: Boolean
-        get() = locationPermissionOk && locationEnabled && networkOk
+        get() = locationPermissionOk && locationEnabled && networkOk &&
+                (!isStrictOem || batteryOptimizationOk)
 
     // Nice-to-have: perfect configuration
     val isHealthy: Boolean
@@ -34,17 +39,34 @@ data class DeviceHealthStatus(
 
 object DeviceHealthChecker {
 
+    /**
+     * OEMs known to aggressively kill background apps.
+     * On these devices, battery optimization whitelist is CRITICAL.
+     */
+    private val STRICT_OEMS = listOf(
+        "samsung", "xiaomi", "redmi", "oppo", "vivo", "realme", "huawei", "honor", "oneplus"
+    )
+
+    /**
+     * Returns true if this device is from an OEM known to aggressively kill apps.
+     */
+    fun isStrictOem(): Boolean {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        return STRICT_OEMS.any { manufacturer.contains(it) }
+    }
+
     fun getHealthStatus(context: Context): DeviceHealthStatus {
         val locationPermissionOk = hasLocationPermission(context)
         val backgroundLocationOk = hasBackgroundLocationPermission(context)
         val locationEnabled = isLocationEnabled(context)
         val batteryOk = isBatteryOptimizationOk(context)
         val networkOk = isNetworkAvailable(context)
+        val strictOem = isStrictOem()
 
         Log.d(
             TAG,
             "health: locPerm=$locationPermissionOk, bgLoc=$backgroundLocationOk, " +
-                    "gps=$locationEnabled, batteryOk=$batteryOk, netOk=$networkOk"
+                    "gps=$locationEnabled, batteryOk=$batteryOk, netOk=$networkOk, strictOem=$strictOem"
         )
 
         return DeviceHealthStatus(
@@ -52,7 +74,8 @@ object DeviceHealthChecker {
             backgroundLocationOk = backgroundLocationOk,
             locationEnabled = locationEnabled,
             batteryOptimizationOk = batteryOk,
-            networkOk = networkOk
+            networkOk = networkOk,
+            isStrictOem = strictOem
         )
     }
 
@@ -121,14 +144,12 @@ object DeviceHealthChecker {
     }
 
     /**
-     * Battery optimization heuristic - GENEROUS to handle Samsung/OEM quirks.
+     * Battery optimization check.
      *
-     * On some devices (especially Samsung), setting "Unrestricted" in the UI
-     * doesn't always flip isIgnoringBatteryOptimizations() to true.
-     *
-     * This check is for RECOMMENDED status only - it should NOT block shift start.
+     * Returns true if the app is whitelisted from battery optimization (Doze mode).
+     * On strict OEMs, this is CRITICAL for reliable tracking.
      */
-    private fun isBatteryOptimizationOk(context: Context): Boolean {
+    fun isBatteryOptimizationOk(context: Context): Boolean {
         // Before Android M (API 23), there's no Doze/battery optimization
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             Log.d(TAG, "Battery optimization: SDK<23 → treated as OK")
@@ -137,24 +158,15 @@ object DeviceHealthChecker {
 
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         if (pm == null) {
-            // If we can't access PowerManager, don't show a warning
-            Log.w(TAG, "Battery optimization: PowerManager unavailable → treating as OK")
-            return true
+            // If we can't access PowerManager, assume the worst on strict OEMs
+            Log.w(TAG, "Battery optimization: PowerManager unavailable")
+            return !isStrictOem()
         }
 
         val ignoring = pm.isIgnoringBatteryOptimizations(context.packageName)
         Log.d(TAG, "Battery optimization: isIgnoringBatteryOptimizations=$ignoring")
 
-        // GENEROUS HEURISTIC: Even if ignoring==false, we don't strictly require it
-        // because the foreground service + WorkManager should keep us alive.
-        // On Samsung, this often returns false even when "Unrestricted" is set.
-        // We still show the recommendation, but always return true to avoid false negatives.
-        if (!ignoring) {
-            Log.d(TAG, "Battery optimization: system says optimized, but FGS should keep us alive → treating as OK")
-        }
-
-        // Always return true - this is just a recommendation
-        return true
+        return ignoring
     }
 
     private fun isLocationEnabled(context: Context): Boolean {

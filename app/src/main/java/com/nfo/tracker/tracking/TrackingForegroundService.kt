@@ -27,6 +27,7 @@ import com.nfo.tracker.R
 import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.data.local.HeartbeatEntity
 import com.nfo.tracker.data.remote.SupabaseClient
+import com.nfo.tracker.work.HeartbeatSyncHelper
 import com.nfo.tracker.work.ShiftStateHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -183,6 +184,9 @@ class TrackingForegroundService : Service() {
         // DEFENSIVE: Check permission before calling startForeground with type=location
         if (!hasLocationPermission()) {
             Log.e(TAG, "Missing location permission, cannot start foreground service with type=location")
+            serviceScope.launch {
+                markTrackingError("permission")
+            }
             stopSelf()
             return
         }
@@ -205,11 +209,51 @@ class TrackingForegroundService : Service() {
             isRunningInternal = true
         } catch (se: SecurityException) {
             Log.e(TAG, "SecurityException when starting location foreground service", se)
+            serviceScope.launch {
+                markTrackingError("fgs-security")
+            }
             stopSelf()
         }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * Called when user swipes app away from Recents.
+     * If NFO is on shift and logged in, attempt to restart the service
+     * to maintain tracking continuity.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "onTaskRemoved called")
+
+        // Check if user is on shift and logged in
+        val isOnShift = ShiftStateHelper.isOnShift(applicationContext)
+        val isLoggedIn = ShiftStateHelper.isLoggedIn(applicationContext)
+
+        if (isOnShift && isLoggedIn) {
+            Log.w(TAG, "onTaskRemoved: User on shift, attempting service restart...")
+
+            // Attempt to restart the service
+            val restartIntent = Intent(applicationContext, TrackingForegroundService::class.java).apply {
+                action = ACTION_START
+            }
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    applicationContext.startForegroundService(restartIntent)
+                } else {
+                    applicationContext.startService(restartIntent)
+                }
+                Log.d(TAG, "onTaskRemoved: Service restart requested")
+            } catch (e: Exception) {
+                Log.e(TAG, "onTaskRemoved: Failed to restart service: ${e.message}", e)
+                // If we can't restart, the watchdog will detect stale state
+            }
+        } else {
+            Log.d(TAG, "onTaskRemoved: User not on shift or not logged in, no restart needed")
+        }
+    }
 
     override fun onDestroy() {
         // Mark service as stopped
@@ -217,6 +261,62 @@ class TrackingForegroundService : Service() {
         stopLocationUpdates()
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * Logs an error heartbeat to Room before the service stops due to an error.
+     * This ensures the dashboard can see WHY the device went silent.
+     *
+     * @param reason A short reason code (e.g., "permission", "fgs-security")
+     */
+    private suspend fun markTrackingError(reason: String) {
+        try {
+            val username = ShiftStateHelper.getUsername(applicationContext)
+            val displayName = ShiftStateHelper.getDisplayName(applicationContext)
+            val homeLocation = ShiftStateHelper.getHomeLocation(applicationContext)
+
+            if (username.isNullOrBlank()) {
+                Log.w(TAG, "markTrackingError: No username, cannot log error heartbeat")
+                return
+            }
+
+            val db = HeartbeatDatabase.getInstance(applicationContext)
+            val dao = db.heartbeatDao()
+
+            // Try to get last known location from most recent heartbeat
+            val lastHeartbeat = dao.getLastHeartbeat()
+            val now = System.currentTimeMillis()
+
+            val errorHeartbeat = HeartbeatEntity(
+                username = username,
+                name = displayName,
+                onShift = false,
+                status = "device-error-$reason",
+                activity = null,
+                siteId = null,
+                workOrderId = null,
+                viaWarehouse = null,
+                warehouseName = null,
+                lat = lastHeartbeat?.lat,
+                lng = lastHeartbeat?.lng,
+                updatedAt = now,
+                loggedIn = true,
+                lastPing = now,
+                lastActiveSource = "service-error",
+                lastActiveAt = now,
+                homeLocation = homeLocation,
+                createdAtLocal = now,
+                synced = false
+            )
+
+            dao.upsert(errorHeartbeat)
+            Log.w(TAG, "markTrackingError: Logged error heartbeat with status=device-error-$reason")
+
+            // Trigger immediate sync so dashboard sees the error quickly
+            HeartbeatSyncHelper.enqueueImmediateSync(applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "markTrackingError: Failed to log error heartbeat", e)
+        }
     }
 
     private fun startLocationUpdates() {
@@ -231,6 +331,10 @@ class TrackingForegroundService : Service() {
 
         if (!hasFine && !hasCoarse) {
             // No permission – nothing to do, let the activity handle asking the user
+            Log.e(TAG, "startLocationUpdates: Missing location permission")
+            serviceScope.launch {
+                markTrackingError("permission")
+            }
             stopSelf()
             return
         }

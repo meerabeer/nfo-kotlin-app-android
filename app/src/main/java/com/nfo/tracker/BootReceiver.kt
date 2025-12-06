@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.work.HealthWatchdogScheduler
+import com.nfo.tracker.work.ShiftStateHelper
 
 /**
  * BroadcastReceiver that handles device boot completion.
@@ -31,12 +32,11 @@ class BootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "BootReceiver"
 
-        /** SharedPreferences file for tracking state (same as MainActivity). */
-        private const val PREFS_NAME = "nfo_tracker_prefs"
-        private const val KEY_ON_SHIFT = "on_shift"
-
         /** Notification ID for reboot alert (distinct from FGS=1001 and stale=1002). */
         private const val REBOOT_NOTIFICATION_ID = 1003
+
+        /** Intent extra to indicate MainActivity was opened from boot notification. */
+        const val EXTRA_FROM_BOOT = "from_boot_receiver"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -45,14 +45,16 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        Log.d(TAG, "BootReceiver: BOOT_COMPLETED received, checking on_shift state...")
+        Log.d(TAG, "BootReceiver: BOOT_COMPLETED received, checking shift and login state...")
 
-        // Read on_shift from SharedPreferences
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val onShift = prefs.getBoolean(KEY_ON_SHIFT, false)
+        // Read on_shift and is_logged_in using ShiftStateHelper
+        val isOnShift = ShiftStateHelper.isOnShift(context)
+        val isLoggedIn = ShiftStateHelper.isLoggedIn(context)
 
-        if (!onShift) {
-            Log.d(TAG, "BootReceiver: User not on shift at boot → nothing to do")
+        Log.d(TAG, "BootReceiver: isOnShift=$isOnShift, isLoggedIn=$isLoggedIn")
+
+        if (!isOnShift || !isLoggedIn) {
+            Log.d(TAG, "BootReceiver: User not on shift or not logged in → nothing to do")
             return
         }
 
@@ -93,6 +95,7 @@ class BootReceiver : BroadcastReceiver() {
         // Intent to open MainActivity when user taps the notification
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra(EXTRA_FROM_BOOT, true)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -103,8 +106,8 @@ class BootReceiver : BroadcastReceiver() {
 
         val notification = NotificationCompat.Builder(context, TrackingForegroundService.CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("NFO Tracker")
-            .setContentText("Device rebooted while on shift. Please open NFO Tracker to resume tracking.")
+            .setContentTitle("NFO Tracker – Resume shift")
+            .setContentText("Tap to reopen app and resume tracking.")
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

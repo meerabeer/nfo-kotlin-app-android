@@ -113,7 +113,7 @@ fun DeviceHealthScreen(
                 fixButtonText = "Retry"
             )
 
-            // RECOMMENDED (not required)
+            // RECOMMENDED (not required unless on strict OEM)
             HealthCheckItem(
                 label = "Background Location",
                 description = if (status.backgroundLocationOk) "OK" else "Fix recommended",
@@ -122,11 +122,16 @@ fun DeviceHealthScreen(
                 onFix = onOpenAppSettings
             )
 
+            // Battery optimization is CRITICAL on strict OEMs (Samsung, Xiaomi, etc.)
             HealthCheckItem(
                 label = "Battery Optimization",
-                description = if (status.batteryOptimizationOk) "Unrestricted" else "Fix recommended",
+                description = when {
+                    status.batteryOptimizationOk -> "Unrestricted"
+                    status.isStrictOem -> "REQUIRED on this device"
+                    else -> "Fix recommended"
+                },
                 isOk = status.batteryOptimizationOk,
-                isCritical = false,  // Recommended, not required
+                isCritical = status.isStrictOem,  // Critical on strict OEMs
                 onFix = onOpenBatterySettings
             )
 
@@ -155,8 +160,13 @@ fun DeviceHealthScreen(
 
             if (!status.allCriticalOk) {
                 Spacer(modifier = Modifier.height(16.dp))
+                val message = if (status.isStrictOem && !status.batteryOptimizationOk) {
+                    "This device (${android.os.Build.MANUFACTURER}) requires battery optimization to be disabled"
+                } else {
+                    "Fix required items above to continue"
+                }
                 Text(
-                    text = "Fix required items above to continue",
+                    text = message,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -283,7 +293,8 @@ fun DeviceHealthScreenPreview_AllOk() {
                 backgroundLocationOk = true,
                 locationEnabled = true,
                 batteryOptimizationOk = true,
-                networkOk = true
+                networkOk = true,
+                isStrictOem = false
             ),
             onRefresh = {},
             onOpenLocationSettings = {},
@@ -305,7 +316,8 @@ fun DeviceHealthScreenPreview_SomeIssues() {
                 backgroundLocationOk = false,
                 locationEnabled = true,
                 batteryOptimizationOk = false,
-                networkOk = true
+                networkOk = true,
+                isStrictOem = true
             ),
             onRefresh = {},
             onOpenLocationSettings = {},

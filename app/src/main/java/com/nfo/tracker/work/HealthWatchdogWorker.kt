@@ -64,10 +64,6 @@ class HealthWatchdogWorker(
         /** Unique work name for WorkManager. */
         const val WATCHDOG_UNIQUE_WORK_NAME = "health_watchdog_work"
 
-        /** SharedPreferences file for tracking state. */
-        private const val PREFS_NAME = "nfo_tracker_prefs"
-        private const val KEY_ON_SHIFT = "on_shift"
-
         /** SharedPreferences file for health watchdog state. */
         private const val HEALTH_PREFS_NAME = "health_watchdog"
         private const val KEY_TRACKING_HEALTHY = "tracking_healthy"
@@ -81,9 +77,8 @@ class HealthWatchdogWorker(
         try {
             Log.d(TAG, "Watchdog: check started")
 
-            // 1. Read on_shift from nfo_tracker_prefs
-            val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val isOnShift = prefs.getBoolean(KEY_ON_SHIFT, false)
+            // 1. Read on_shift using centralized ShiftStateHelper
+            val isOnShift = ShiftStateHelper.isOnShift(applicationContext)
 
             if (!isOnShift) {
                 Log.d(TAG, "Watchdog: user not on shift → skipping check")

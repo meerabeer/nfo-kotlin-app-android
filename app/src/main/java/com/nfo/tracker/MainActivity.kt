@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.edit
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -65,10 +64,7 @@ import com.nfo.tracker.work.HeartbeatWorker
 import com.nfo.tracker.work.HealthWatchdogScheduler
 import com.nfo.tracker.work.ShiftStateHelper
 import kotlinx.coroutines.launch
-
-/** SharedPreferences file for tracking state (shared with HealthWatchdogWorker). */
-private const val PREFS_NAME = "nfo_tracker_prefs"
-private const val KEY_ON_SHIFT = "on_shift"
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
 
@@ -182,30 +178,12 @@ private fun enqueueImmediateHeartbeatSync(context: Context) {
 }
 
 /**
- * Persists the on-shift state to SharedPreferences.
- * This is read by HealthWatchdogWorker to decide whether to check heartbeat freshness.
- */
-private fun saveOnShiftState(context: Context, isOnShift: Boolean) {
-    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-        putBoolean(KEY_ON_SHIFT, isOnShift)
-    }
-}
-
-/**
- * Reads the on-shift state from SharedPreferences.
- */
-private fun readOnShiftState(context: Context): Boolean {
-    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .getBoolean(KEY_ON_SHIFT, false)
-}
-
-/**
  * Actually starts the shift and tracking services.
  * This should only be called after all device health checks pass.
  */
 private fun actuallyStartShiftAndTracking(context: Context) {
     Log.d("MainActivity", "Starting shift and tracking services...")
-    saveOnShiftState(context, true)
+    ShiftStateHelper.setOnShift(context, true)
     TrackingForegroundService.start(context)
     HeartbeatWorker.schedule(context)
     HealthWatchdogScheduler.schedule(context)
@@ -225,12 +203,46 @@ fun TrackingScreen(
 
     // Initialize onShift from persisted SharedPreferences value
     // This ensures the UI reflects the correct state when navigating back from other screens
-    var onShift by remember { mutableStateOf(readOnShiftState(context)) }
+    var onShift by remember { mutableStateOf(ShiftStateHelper.isOnShift(context)) }
     var isGoingOffShift by remember { mutableStateOf(false) }  // Loading state for off-shift
 
     // Device health gate state
     var showDeviceHealthScreen by remember { mutableStateOf(false) }
     var deviceHealthStatus by remember { mutableStateOf<DeviceHealthStatus?>(null) }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Auto-restart tracking after reboot if user was on shift
+    // This handles the case where the device rebooted while the user was on shift.
+    // The BootReceiver shows a notification, and when the user opens the app,
+    // we automatically restart tracking if health checks pass.
+    // ═══════════════════════════════════════════════════════════════════════════
+    LaunchedEffect(Unit) {
+        val persistedOnShift = ShiftStateHelper.isOnShift(context)
+        val serviceRunning = TrackingForegroundService.isRunning()
+        
+        Log.d("MainActivity", "TrackingScreen: persistedOnShift=$persistedOnShift, serviceRunning=$serviceRunning")
+        
+        if (persistedOnShift && !serviceRunning) {
+            // User was on shift but service isn't running (e.g., after reboot)
+            // Check health and auto-restart if OK
+            Log.d("MainActivity", "TrackingScreen: Detected post-boot state, checking health for auto-restart...")
+            
+            val status = DeviceHealthChecker.getHealthStatus(context)
+            if (status.isHealthy) {
+                Log.d("MainActivity", "TrackingScreen: Device healthy, auto-restarting tracking")
+                // Don't update onShift state variable (it will be set from prefs anyway)
+                // Just restart the services
+                TrackingForegroundService.start(context)
+                HeartbeatWorker.schedule(context)
+                HealthWatchdogScheduler.schedule(context)
+                enqueueImmediateHeartbeatSync(context)
+            } else {
+                Log.w("MainActivity", "TrackingScreen: Device not healthy, showing health screen for user to fix")
+                deviceHealthStatus = status
+                showDeviceHealthScreen = true
+            }
+        }
+    }
 
     // Dropdown menu state
     var showMenu by remember { mutableStateOf(false) }
@@ -501,10 +513,10 @@ fun TrackingScreen(
 
                                 // After heartbeat is written (and sync attempted), stop everything
                                 onShift = false
-                                saveOnShiftState(context, false)
+                                ShiftStateHelper.setOnShift(context, false)
                                 TrackingForegroundService.stop(context)
                                 HealthWatchdogScheduler.cancel(context)
-                                // Note: HeartbeatWorker keeps running as backup to retry failed syncs
+                                HeartbeatWorker.cancel(context)  // Cancel periodic sync since off shift
 
                                 isGoingOffShift = false
                             }

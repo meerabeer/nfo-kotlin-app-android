@@ -28,6 +28,7 @@ object ShiftStateHelper {
     private const val KEY_DISPLAY_NAME = "display_name"
     private const val KEY_IS_LOGGED_IN = "is_logged_in"
     private const val KEY_HOME_LOCATION = "home_location"
+    private const val KEY_ON_SHIFT = "on_shift"
 
     // Activity context keys
     private const val KEY_CURRENT_ACTIVITY = "current_activity"
@@ -59,6 +60,28 @@ object ShiftStateHelper {
     fun isLoggedIn(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+    }
+
+    /**
+     * Returns true if the user is currently on shift.
+     */
+    fun isOnShift(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_ON_SHIFT, false)
+    }
+
+    /**
+     * Sets the on-shift state in SharedPreferences.
+     *
+     * @param context Application or Activity context.
+     * @param isOnShift True if user is going on shift, false if going off shift.
+     */
+    fun setOnShift(context: Context, isOnShift: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(KEY_ON_SHIFT, isOnShift)
+            .apply()
+        Log.d(TAG, "On-shift state set to: $isOnShift")
     }
 
     /**

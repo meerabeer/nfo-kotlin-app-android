@@ -77,7 +77,7 @@ fun DiagnosticsScreen(
             DiagnosticsData(
                 username = ShiftStateHelper.getUsername(context),
                 displayName = ShiftStateHelper.getDisplayName(context),
-                isOnShift = isOnShiftFromPrefs(context),
+                isOnShift = ShiftStateHelper.isOnShift(context),
                 lastHeartbeat = lastHeartbeat,
                 healthStatus = DeviceHealthChecker.getHealthStatus(context),
                 isTrackingServiceRunning = TrackingForegroundService.isRunning()
@@ -253,14 +253,6 @@ private data class DiagnosticsData(
     val healthStatus: DeviceHealthStatus,
     val isTrackingServiceRunning: Boolean
 )
-
-/**
- * Reads on-shift state from SharedPreferences.
- */
-private fun isOnShiftFromPrefs(context: Context): Boolean {
-    val prefs = context.getSharedPreferences("nfo_tracker_prefs", Context.MODE_PRIVATE)
-    return prefs.getBoolean("on_shift", false)
-}
 
 /**
  * Formats a timestamp to human-readable string.
