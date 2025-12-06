@@ -14,17 +14,26 @@ import androidx.core.content.ContextCompat
 import com.nfo.tracker.tracking.TrackingForegroundService
 import com.nfo.tracker.work.HealthWatchdogScheduler
 import com.nfo.tracker.work.ShiftStateHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * BroadcastReceiver that handles device boot completion.
  *
- * If the NFO was "on shift" and logged in when the device rebooted, this receiver:
+ * If the NFO was "on shift" and logged in when the device rebooted:
+ *
+ * **Android 13 and below:**
  * 1. Starts TrackingForegroundService to auto-resume location tracking and heartbeats.
  * 2. Shows a notification informing the user tracking has resumed.
  * 3. Schedules the health watchdog to monitor heartbeat freshness.
  *
- * This ensures heartbeats continue automatically after reboot without requiring
- * the NFO to manually reopen the app.
+ * **Android 14+ (UPSIDE_DOWN_CAKE):**
+ * Android 14+ restricts starting foreground services with type=location from BOOT_COMPLETED.
+ * 1. Logs a "device-reboot-waiting-app-open" heartbeat to Supabase so the dashboard shows the reboot.
+ * 2. Shows a notification asking the user to open the app to resume tracking.
+ * 3. Schedules the health watchdog.
+ * 4. When user opens the app, TrackingScreen's LaunchedEffect auto-starts tracking.
  *
  * Requires RECEIVE_BOOT_COMPLETED permission in AndroidManifest.xml.
  */
@@ -60,22 +69,35 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         // User was on shift when device rebooted.
-        Log.w(TAG, "BootReceiver: Device rebooted while on shift → starting tracking service, posting notification, scheduling watchdog")
+        // Android 14+ (UPSIDE_DOWN_CAKE) restricts starting FGS with type=location from BOOT_COMPLETED.
+        // On Android 13 and below, we can auto-start the service.
+        val canAutoStart = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE
 
-        // 1. Start TrackingForegroundService to auto-resume heartbeats
-        // This is allowed even on Android 13+ because:
-        // - We have FOREGROUND_SERVICE_LOCATION permission in manifest
-        // - User granted location permission before going on shift
-        // - Service calls startForeground() immediately
-        startTrackingService(context)
-
-        // 2. Show a notification informing user tracking has resumed
-        showRebootNotification(context)
+        if (canAutoStart) {
+            Log.w(TAG, "BootReceiver: Device rebooted while on shift (Android <14) → auto-starting tracking service")
+            
+            // 1. Start TrackingForegroundService to auto-resume heartbeats
+            startTrackingService(context)
+            
+            // 2. Show a notification informing user tracking has resumed
+            showRebootNotification(context, autoStarted = true)
+        } else {
+            Log.w(TAG, "BootReceiver: Device rebooted while on shift (Android 14+) → cannot auto-start, logging reboot heartbeat")
+            
+            // On Android 14+, we cannot start FGS from BOOT_COMPLETED due to restrictions
+            // Log a "device-reboot-waiting-app-open" heartbeat so the dashboard shows the reboot event
+            CoroutineScope(Dispatchers.IO).launch {
+                ShiftStateHelper.logRebootWaitingHeartbeat(context)
+            }
+            
+            // Show notification asking user to open app to resume tracking
+            showRebootNotification(context, autoStarted = false)
+        }
 
         // 3. Schedule the watchdog to detect stale heartbeat and sync "device-silent" to Supabase
         HealthWatchdogScheduler.scheduleOneTime(context)
 
-        Log.d(TAG, "BootReceiver: Service started, notification posted (id=$REBOOT_NOTIFICATION_ID), watchdog scheduled")
+        Log.d(TAG, "BootReceiver: canAutoStart=$canAutoStart, notification posted (id=$REBOOT_NOTIFICATION_ID), watchdog scheduled")
     }
 
     /**
@@ -102,12 +124,14 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Shows a normal (non-foreground) notification informing the user that tracking
-     * paused after reboot and they need to reopen the app.
+     * Shows a normal (non-foreground) notification informing the user about tracking status after reboot.
+     *
+     * @param context Application context.
+     * @param autoStarted True if tracking was auto-started (Android <14), false if user must open app (Android 14+).
      *
      * Uses the same channel as [TrackingForegroundService] to keep notifications grouped.
      */
-    private fun showRebootNotification(context: Context) {
+    private fun showRebootNotification(context: Context, autoStarted: Boolean) {
         // Ensure notification channel exists (required for Android O+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -135,10 +159,17 @@ class BootReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Notification content depends on whether we could auto-start tracking
+        val (title, text) = if (autoStarted) {
+            "NFO Tracker – Tracking resumed" to "Tracking auto-resumed after reboot. Tap to open app."
+        } else {
+            "NFO Tracker – Device rebooted" to "Open NFO Tracker now to resume tracking."
+        }
+
         val notification = NotificationCompat.Builder(context, TrackingForegroundService.CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("NFO Tracker – Tracking resumed")
-            .setContentText("Tracking auto-resumed after reboot. Tap to open app.")
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

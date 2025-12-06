@@ -1,6 +1,8 @@
 package com.nfo.tracker.work
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.data.local.HeartbeatEntity
@@ -35,6 +37,9 @@ object ShiftStateHelper {
     private const val KEY_CURRENT_SITE_ID = "current_site_id"
     private const val KEY_VIA_WAREHOUSE = "via_warehouse"
     private const val KEY_WAREHOUSE_NAME = "warehouse_name_current"
+
+    // FCM token key
+    private const val KEY_FCM_TOKEN = "fcm_token"
 
     /**
      * Returns the current username from SharedPreferences.
@@ -374,5 +379,123 @@ object ShiftStateHelper {
         Log.d(TAG, "Cleared activity context after logout heartbeat")
 
         success
+    }
+
+    /**
+     * Logs a "device-reboot-waiting-app-open" heartbeat to Room and enqueues sync.
+     *
+     * This is called from BootReceiver on Android 14+ when the device reboots while
+     * the user was on shift. On Android 14+, we cannot start a foreground service
+     * with type=location from BOOT_COMPLETED, so we log this status heartbeat
+     * to make the reboot visible on the Supabase dashboard.
+     *
+     * The heartbeat will have:
+     * - on_shift = true (user is still considered on shift)
+     * - status = "device-reboot-waiting-app-open"
+     * - logged_in = true
+     * - last_active_source = "boot-receiver"
+     *
+     * @param context Application context (from BroadcastReceiver).
+     */
+    suspend fun logRebootWaitingHeartbeat(context: Context) = withContext(Dispatchers.IO) {
+        val username = getUsername(context)
+        val displayName = getDisplayName(context)
+        val homeLocation = getHomeLocation(context)
+
+        if (username.isNullOrBlank()) {
+            Log.w(TAG, "logRebootWaitingHeartbeat: No username found, skipping")
+            return@withContext
+        }
+
+        Log.d(TAG, "Logging device-reboot-waiting-app-open heartbeat for username=$username")
+
+        val db = HeartbeatDatabase.getInstance(context)
+        val dao = db.heartbeatDao()
+
+        val now = System.currentTimeMillis()
+
+        // Try to get last known location from the most recent heartbeat
+        val lastHeartbeat = dao.getLastHeartbeat()
+        val lat = lastHeartbeat?.lat
+        val lng = lastHeartbeat?.lng
+
+        // Build the reboot-waiting heartbeat
+        val rebootHeartbeat = HeartbeatEntity(
+            username = username,
+            name = displayName,
+            onShift = true,  // Still on shift, just waiting for app open
+            status = "device-reboot-waiting-app-open",
+            activity = getCurrentActivity(context),
+            siteId = getCurrentSiteId(context),
+            viaWarehouse = isViaWarehouse(context),
+            warehouseName = getWarehouseName(context),
+            lat = lat,
+            lng = lng,
+            updatedAt = now,
+            loggedIn = true,
+            lastPing = now,
+            lastActiveSource = "boot-receiver",
+            lastActiveAt = now,
+            homeLocation = homeLocation,
+            createdAtLocal = now,
+            synced = false
+        )
+
+        // Upsert into Room (replaces existing row for this username)
+        val localId = dao.upsert(rebootHeartbeat)
+        Log.d(TAG, "Upserted reboot-waiting heartbeat id=$localId")
+
+        // Enqueue immediate sync (don't block the BroadcastReceiver)
+        HeartbeatSyncHelper.enqueueImmediateSync(context)
+        Log.d(TAG, "Enqueued immediate sync for reboot-waiting heartbeat")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FCM Token Management
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Returns the device's unique Android ID.
+     * Used to identify this device when registering FCM tokens with Supabase.
+     */
+    fun getDeviceId(context: Context): String {
+        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    }
+
+    /**
+     * Returns the stored FCM token, or null if not yet received.
+     */
+    fun getFcmToken(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_FCM_TOKEN, null)
+    }
+
+    /**
+     * Updates the stored FCM token and logs relevant device info.
+     * Called by NfoFirebaseMessagingService when a new token is received.
+     *
+     * @param context Application context.
+     * @param token The new FCM token from Firebase.
+     */
+    fun updateFcmToken(context: Context, token: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
+
+        val username = getUsername(context)
+        val deviceId = getDeviceId(context)
+        val osVersion = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+        val manufacturer = Build.MANUFACTURER
+        val model = Build.MODEL
+
+        Log.d(TAG, "updateFcmToken: username=$username, deviceId=$deviceId, " +
+            "device=$manufacturer $model, os=$osVersion, token=${token.take(20)}...")
+
+        // TODO: In a later step, send this to Supabase nfo_devices table:
+        // - username
+        // - device_id (ANDROID_ID)
+        // - fcm_token
+        // - os_version
+        // - device_name (manufacturer + model)
+        // - last_token_update (timestamp)
     }
 }

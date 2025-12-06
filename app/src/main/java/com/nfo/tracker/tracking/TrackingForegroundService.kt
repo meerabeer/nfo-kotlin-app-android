@@ -131,7 +131,8 @@ class TrackingForegroundService : Service() {
             }
             ACTION_START_FROM_BOOT -> {
                 // Boot-initiated start (from BootReceiver after device reboot)
-                // This is allowed on Android 13+ if we have proper permissions and call startForeground() immediately
+                // On Android <14, this is called directly from BOOT_COMPLETED
+                // On Android 14+, FGS cannot be started from boot, so this action is not used from BootReceiver
                 Log.d(TAG, "Starting tracking from boot (ACTION_START_FROM_BOOT)")
                 startForegroundWithType()
                 startLocationUpdates()

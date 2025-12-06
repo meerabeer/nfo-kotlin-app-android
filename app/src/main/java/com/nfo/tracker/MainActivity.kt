@@ -218,14 +218,15 @@ fun TrackingScreen(
     // ═══════════════════════════════════════════════════════════════════════════
     LaunchedEffect(Unit) {
         val persistedOnShift = ShiftStateHelper.isOnShift(context)
+        val persistedLoggedIn = ShiftStateHelper.isLoggedIn(context)
         val serviceRunning = TrackingForegroundService.isRunning()
         
-        Log.d("MainActivity", "TrackingScreen: persistedOnShift=$persistedOnShift, serviceRunning=$serviceRunning")
+        Log.d("MainActivity", "TrackingScreen: persistedOnShift=$persistedOnShift, persistedLoggedIn=$persistedLoggedIn, serviceRunning=$serviceRunning")
         
-        if (persistedOnShift && !serviceRunning) {
-            // User was on shift but service isn't running (e.g., after reboot)
+        if (persistedOnShift && persistedLoggedIn && !serviceRunning) {
+            // User was on shift but service isn't running (e.g., after reboot on Android 14+)
             // Check health and auto-restart if OK
-            Log.d("MainActivity", "TrackingScreen: Detected post-boot state, checking health for auto-restart...")
+            Log.d("MainActivity", "TrackingScreen: Resuming tracking after reboot from UI (on_shift & logged_in)")
             
             val status = DeviceHealthChecker.getHealthStatus(context)
             if (status.isHealthy) {
