@@ -106,6 +106,11 @@ fun LoginScreen(
                     displayName = result.name,
                     homeLocation = result.homeLocation
                 )
+
+                // Upload FCM token to Supabase if it already exists
+                // (token may have been received before login)
+                ShiftStateHelper.uploadFcmTokenIfExists(context, result.username)
+
                 onLoginSuccess()
             } else {
                 Log.w(TAG, "Login failed for username=$trimmedUsername")

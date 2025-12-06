@@ -7,7 +7,9 @@ import android.util.Log
 import com.nfo.tracker.data.local.HeartbeatDatabase
 import com.nfo.tracker.data.local.HeartbeatEntity
 import com.nfo.tracker.data.remote.SupabaseClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -486,16 +488,71 @@ object ShiftStateHelper {
         val osVersion = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
         val manufacturer = Build.MANUFACTURER
         val model = Build.MODEL
+        val deviceName = "$manufacturer $model"
 
         Log.d(TAG, "updateFcmToken: username=$username, deviceId=$deviceId, " +
-            "device=$manufacturer $model, os=$osVersion, token=${token.take(20)}...")
+            "device=$deviceName, os=$osVersion, token=${token.take(20)}...")
 
-        // TODO: In a later step, send this to Supabase nfo_devices table:
-        // - username
-        // - device_id (ANDROID_ID)
-        // - fcm_token
-        // - os_version
-        // - device_name (manufacturer + model)
-        // - last_token_update (timestamp)
+        // Upload to Supabase nfo_devices table (fire-and-forget, non-blocking)
+        if (username != null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val success = SupabaseClient.upsertDeviceAsync(
+                        username = username,
+                        deviceId = deviceId,
+                        fcmToken = token,
+                        osVersion = osVersion,
+                        deviceName = deviceName
+                    )
+                    if (success) {
+                        Log.d(TAG, "FCM token uploaded to Supabase successfully")
+                    } else {
+                        Log.w(TAG, "FCM token upload to Supabase failed (will retry on next token refresh)")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "FCM token upload error: ${e.message}", e)
+                }
+            }
+        } else {
+            Log.d(TAG, "Skipping FCM token upload - no user logged in yet. " +
+                "Token will be uploaded after login.")
+        }
+    }
+
+    /**
+     * Uploads the current FCM token to Supabase if one exists.
+     * Call this after a successful login to ensure the device is registered.
+     *
+     * @param context Application context.
+     * @param username The username of the logged-in user.
+     */
+    suspend fun uploadFcmTokenIfExists(context: Context, username: String) {
+        val fcmToken = getFcmToken(context) ?: run {
+            Log.d(TAG, "uploadFcmTokenIfExists: no FCM token stored yet")
+            return
+        }
+
+        val deviceId = getDeviceId(context)
+        val osVersion = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+        val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+        Log.d(TAG, "uploadFcmTokenIfExists: uploading token for username=$username")
+
+        try {
+            val success = SupabaseClient.upsertDeviceAsync(
+                username = username,
+                deviceId = deviceId,
+                fcmToken = fcmToken,
+                osVersion = osVersion,
+                deviceName = deviceName
+            )
+            if (success) {
+                Log.d(TAG, "FCM token uploaded to Supabase after login")
+            } else {
+                Log.w(TAG, "FCM token upload failed after login")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "FCM token upload error after login: ${e.message}", e)
+        }
     }
 }

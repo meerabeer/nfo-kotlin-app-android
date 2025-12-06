@@ -392,4 +392,87 @@ object SupabaseClient {
             }
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Device Registration (FCM Token Upload)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Upserts a device record to the nfo_devices table.
+     * Used to register/update the FCM token for push notifications.
+     *
+     * The table uses (username, device_id) as a composite unique key.
+     * This allows one user to have multiple devices, each with its own FCM token.
+     *
+     * @param username The NFO's username.
+     * @param deviceId The unique Android device ID (ANDROID_ID).
+     * @param fcmToken The Firebase Cloud Messaging token for this device.
+     * @param osVersion The Android version string (e.g., "Android 14 (SDK 34)").
+     * @param deviceName The device manufacturer and model (e.g., "Samsung SM-G998B").
+     * @return true if the upsert succeeded, false otherwise.
+     */
+    suspend fun upsertDeviceAsync(
+        username: String,
+        deviceId: String,
+        fcmToken: String,
+        osVersion: String,
+        deviceName: String
+    ): Boolean {
+        val endpoint = "$BASE_URL/rest/v1/nfo_devices?on_conflict=username,device_id"
+
+        val now = OffsetDateTime.now(riyadhZone).toString()
+
+        val jsonBody = JSONObject().apply {
+            put("username", username)
+            put("device_id", deviceId)
+            put("fcm_token", fcmToken)
+            put("platform", "android")
+            put("os_version", osVersion)
+            put("device_name", deviceName)
+            put("last_token_update", now)
+            put("last_seen_at", now)
+        }
+
+        Log.d(TAG, "upsertDeviceAsync: username=$username, deviceId=$deviceId, " +
+            "fcmToken=${fcmToken.take(20)}..., device=$deviceName")
+
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody)
+            .addHeader("apikey", API_KEY)
+            .addHeader("Authorization", "Bearer $API_KEY")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Prefer", "return=minimal,resolution=merge-duplicates")
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val responseBody = try {
+                        response.body?.string()
+                    } catch (e: Exception) {
+                        "error reading body: ${e.message}"
+                    }
+
+                    if (code in 200..299) {
+                        Log.d(TAG, "upsertDeviceAsync success: code=$code")
+                        return@withContext true
+                    } else if (code == 409) {
+                        Log.w(TAG, "upsertDeviceAsync conflict (409), treating as success")
+                        return@withContext true
+                    } else {
+                        Log.e(TAG, "upsertDeviceAsync failed: code=$code, body=$responseBody")
+                        return@withContext false
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "upsertDeviceAsync error: ${e.message}", e)
+                false
+            }
+        }
+    }
 }
