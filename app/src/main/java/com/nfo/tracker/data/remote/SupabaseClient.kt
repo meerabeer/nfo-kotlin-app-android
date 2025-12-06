@@ -416,25 +416,22 @@ object SupabaseClient {
         deviceId: String,
         fcmToken: String,
         osVersion: String,
-        deviceName: String
+        deviceName: String  // kept for caller compatibility, not sent to DB
     ): Boolean {
         val endpoint = "$BASE_URL/rest/v1/nfo_devices?on_conflict=username,device_id"
 
-        val now = OffsetDateTime.now(riyadhZone).toString()
-
+        // Only include columns that exist in the nfo_devices table.
+        // Do NOT send last_seen_at; let the DB default (now()) populate it.
         val jsonBody = JSONObject().apply {
             put("username", username)
             put("device_id", deviceId)
             put("fcm_token", fcmToken)
             put("platform", "android")
             put("os_version", osVersion)
-            put("device_name", deviceName)
-            put("last_token_update", now)
-            put("last_seen_at", now)
         }
 
         Log.d(TAG, "upsertDeviceAsync: username=$username, deviceId=$deviceId, " +
-            "fcmToken=${fcmToken.take(20)}..., device=$deviceName")
+            "fcmToken=$fcmToken, os=$osVersion")
 
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val requestBody = jsonBody.toString().toRequestBody(mediaType)
@@ -445,7 +442,7 @@ object SupabaseClient {
             .addHeader("apikey", API_KEY)
             .addHeader("Authorization", "Bearer $API_KEY")
             .addHeader("Content-Type", "application/json")
-            .addHeader("Prefer", "return=minimal,resolution=merge-duplicates")
+            .addHeader("Prefer", "resolution=merge-duplicates")
             .build()
 
         return withContext(Dispatchers.IO) {

@@ -23,8 +23,8 @@ class NfoFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token received: ${token.take(20)}...")
-        // Save token locally and (later) send to Supabase
+        Log.d(TAG, "New FCM token received (FULL): $token")
+        // Save token locally and send to Supabase
         ShiftStateHelper.updateFcmToken(applicationContext, token)
     }
 
