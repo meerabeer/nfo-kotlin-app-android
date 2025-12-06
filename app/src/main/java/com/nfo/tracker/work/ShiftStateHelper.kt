@@ -120,7 +120,7 @@ object ShiftStateHelper {
             .putString(KEY_DISPLAY_NAME, displayName)
             .putString(KEY_HOME_LOCATION, homeLocation)
             .putBoolean(KEY_IS_LOGGED_IN, true)
-            .apply()
+            .commit()  // Use commit() for synchronous write - ensures username is available immediately
         Log.d(TAG, "User logged in: username=$username, displayName=$displayName, homeLocation=$homeLocation")
     }
 

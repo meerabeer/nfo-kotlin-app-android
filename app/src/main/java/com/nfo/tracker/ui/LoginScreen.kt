@@ -109,7 +109,10 @@ fun LoginScreen(
 
                 // Upload FCM token to Supabase if it already exists
                 // (token may have been received before login)
-                ShiftStateHelper.uploadFcmTokenIfExists(context, result.username)
+                val fcmToken = ShiftStateHelper.getFcmToken(context)
+                if (fcmToken != null) {
+                    ShiftStateHelper.updateFcmToken(context, fcmToken)
+                }
 
                 onLoginSuccess()
             } else {
