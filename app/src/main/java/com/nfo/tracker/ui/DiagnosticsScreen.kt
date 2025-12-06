@@ -1,6 +1,7 @@
 package com.nfo.tracker.ui
 
 import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -219,6 +220,11 @@ fun DiagnosticsScreen(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Section 5: Device Setup Tips
+                    DeviceSetupTipsSection(healthStatus = data.healthStatus)
+
                     Spacer(modifier = Modifier.height(32.dp))
 
                     // Run Diagnostics button
@@ -350,6 +356,139 @@ private fun HealthStatusRow(
                 else -> MaterialTheme.colorScheme.error
             }
         )
+    }
+}
+
+/**
+ * Device Setup Tips section showing manufacturer info and actionable guidance
+ * to prevent silent tracking failures.
+ */
+@Composable
+private fun DeviceSetupTipsSection(healthStatus: DeviceHealthStatus) {
+    val deviceInfo = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+    val isStrictOem = healthStatus.isStrictOem
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Device Setup Tips",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Device Info
+            DiagnosticsRow(label = "Device", value = deviceInfo)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Status indicators with colors
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Battery Mode",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (healthStatus.batteryOptimizationOk) "Unrestricted ✅" else "Restricted ❌ FIX THIS",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (healthStatus.batteryOptimizationOk) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Location",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = when {
+                        healthStatus.locationPermissionOk && healthStatus.locationEnabled -> "ON + Permitted ✅"
+                        healthStatus.locationPermissionOk -> "Permitted but OFF ⚠️"
+                        healthStatus.locationEnabled -> "ON but no Permission ⚠️"
+                        else -> "OFF + No Permission ❌"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = when {
+                        healthStatus.locationPermissionOk && healthStatus.locationEnabled -> Color(0xFF4CAF50)
+                        else -> Color(0xFFFF9800)
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Tips based on OEM
+            Text(
+                text = if (isStrictOem) "⚠️ Tips for ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} devices:" else "📋 Recommended Settings:",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isStrictOem) Color(0xFFFF9800) else MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isStrictOem) {
+                // Strict OEM specific tips
+                Text(
+                    text = "• Set Battery > NFO Tracker > Unrestricted",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Do NOT swipe app away while ON SHIFT",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Keep Location ON and allow 'Always' if offered",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Lock app in Recent Apps (if available)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                // Generic tips
+                Text(
+                    text = "• Battery: Set to Unrestricted / Not Optimized",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Location: Keep ON with permission granted",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Notifications: Allow for this app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

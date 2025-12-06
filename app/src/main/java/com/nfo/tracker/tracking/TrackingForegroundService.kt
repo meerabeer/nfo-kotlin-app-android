@@ -99,9 +99,9 @@ class TrackingForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT  // Must be DEFAULT or higher to reduce OEM throttling
             ).apply {
-                description = "Shows when NFO location tracking is active"
+                description = "Foreground tracking service for NFO location and heartbeats"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -111,6 +111,16 @@ class TrackingForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: action=${intent?.action}")
+
+        // DEFENSIVE: Stop immediately if user is not on shift or not logged in
+        // This prevents "zombie" foreground services that waste battery
+        val isOnShift = ShiftStateHelper.isOnShift(this)
+        val isLoggedIn = ShiftStateHelper.isLoggedIn(this)
+        if (!isOnShift || !isLoggedIn) {
+            Log.w(TAG, "Service started but user is not on shift ($isOnShift) or not logged in ($isLoggedIn). Stopping service.")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         when (intent?.action) {
             ACTION_START -> {
@@ -195,12 +205,14 @@ class TrackingForegroundService : Service() {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Use dual FGS type: location + dataSync for better OS classification
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 )
-                Log.d(TAG, "startForeground called with FOREGROUND_SERVICE_TYPE_LOCATION")
+                Log.d(TAG, "startForeground called with FOREGROUND_SERVICE_TYPE_LOCATION|DATA_SYNC")
             } else {
                 startForeground(NOTIFICATION_ID, notification)
                 Log.d(TAG, "startForeground called (pre-Q)")
